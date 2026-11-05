@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Afrowave.DiskMigrator.Cli</RootNamespace>
+    <AssemblyName>AfrowaveDiskMigrator</AssemblyName>
+    <!-- The RuntimeIdentifier is supplied by build.sh (win-x64) so that the same project
+         can also be built and exercised on the development host. -->
+
+    <!-- Portable, install-free single EXE. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyTitle>Afrowave DiskMigrator</AssemblyTitle>
+    <Description>Bezpecny servisni nastroj pro migraci obsahu fyzickeho disku na jiny disk.</Description>
+    <NoWarn>$(NoWarn);IL2026;IL3050;CA1416</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Afrowave.DiskMigrator.Core\Afrowave.DiskMigrator.Core.csproj" />
+    <ProjectReference Include="..\Afrowave.DiskMigrator.Platform.Windows\Afrowave.DiskMigrator.Platform.Windows.csproj" />
+    <ProjectReference Include="..\Afrowave.DiskMigrator.Platform.Image\Afrowave.DiskMigrator.Platform.Image.csproj" />
+  </ItemGroup>
+
+</Project>

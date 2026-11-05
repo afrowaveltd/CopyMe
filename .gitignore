@@ -1,0 +1,20 @@
+# Build output
+dist/
+bin/
+obj/
+.nuget/
+.dotnet-home/
+
+# Simulated disks and scratch data
+.samples/
+*.img
+*.log
+
+# Editor / OS noise
+.vs/
+.idea/
+*.user
+.DS_Store
+
+# Local git configuration used in the build sandbox
+.gitconfig-local

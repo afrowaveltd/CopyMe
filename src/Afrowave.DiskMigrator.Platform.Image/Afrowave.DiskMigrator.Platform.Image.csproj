@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Afrowave.DiskMigrator.Platform.Image</RootNamespace>
+    <AssemblyName>Afrowave.DiskMigrator.Platform.Image</AssemblyName>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Afrowave.DiskMigrator.Core\Afrowave.DiskMigrator.Core.csproj" />
+  </ItemGroup>
+
+</Project>
