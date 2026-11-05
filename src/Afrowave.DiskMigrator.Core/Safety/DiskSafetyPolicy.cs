@@ -67,6 +67,11 @@ public static class DiskSafetyPolicy
 
         var volumes = environment.MountedVolumes.Where(v => v.DiskNumber == number).ToList();
 
+        if (volumes.Any(v => v.SpansMultipleDisks))
+        {
+            protection.Add("je součástí svazku rozloženého přes více fyzických disků – takový disk nelze bezpečně převzít");
+        }
+
         bool carriesRunningOs = volumes.Any(v => v.Usage.HasFlag(VolumeUsage.RunningOs));
         bool carriesExecutable = volumes.Any(v => v.Usage.HasFlag(VolumeUsage.ExecutableHost));
         bool carriesPaging = volumes.Any(v => v.Usage.HasFlag(VolumeUsage.PagingCarrier));

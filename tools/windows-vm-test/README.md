@@ -56,11 +56,25 @@ Volitelné parametry:
    a prázdný soubor; poznamená si SHA-256 každého z nich.
 5. **Zkusí migraci na cíl, který má oddíl** – očekává odmítnutí (nenulový návratový
    kód) a ověří, že nástroj oddíl nesmazal.
+5b. **Otevře soubor na zdrojovém svazku a zkusí migraci** – ověří, že nástroj převzetí
+   odmítne (`FSCTL_LOCK_VOLUME` musí selhat), vysvětlí to a na cílový disk nic nezapíše.
+   Tím je otestovaná i ta část převzetí, kterou nelze ověřit bez Windows.
 6. Vyčistí cíl a spustí `--dry-run` – očekává plán a ověří, že na cíl nic nezapsal.
 7. Spustí skutečnou migraci (`--source`, `--target`, `--yes`).
 8. Ověří: počet a typy oddílů na cíli, přítomnost a SHA-256 všech souborů,
-   prázdný soubor, a že zdrojový disk zůstal beze změny a není read-only.
+   prázdný soubor, a že zdrojový disk zůstal beze změny.
+9. Ověří **navrácení zdrojového disku Windows**: původní svazek je po skončení opět
+   dostupný pod stejným písmenem, je zapisovatelný a data na něm jsou pořád.
 9. Uklidí – odpojí a smaže VHDX (není-li `-KeepVhds` / `-SkipCleanup`).
+
+### Co skript ověří z převzetí zdroje
+
+| Vlastnost | Jak |
+|---|---|
+| Zdroj s připojenými svazky a písmeny | Zdroj se před migrací připojí jako `S:` – přesně scénář z praxe |
+| Převzetí proběhne | Migrace doběhne; bez převzetí by se nástroj vůbec nespustil |
+| Odmítnutí při obsazeném svazku | Držený popisovač → očekává se odmítnutí a nedotčený cíl |
+| Navrácení zdrojového disku | Po migraci se ověří dostupnost `S:`, zápis a přítomnost dat |
 
 ### Co skript **neověří**
 
@@ -69,6 +83,9 @@ Volitelné parametry:
   (testovaný disk obsahuje jen data, nikoli instalaci Windows).
 * Chování při odpojení USB během operace (lze zkusit ručně podle níže uvedeného
   seznamu).
+* Zdroj s **používaným stránkovacím souborem** – takový disk nelze na testovacím
+  stroji rozumně vytvořit.
+* Zdroj, který je **součástí svazku přes více disků** – vyžadovalo by Storage Spaces.
 
 ### Bezpečnost skriptu
 

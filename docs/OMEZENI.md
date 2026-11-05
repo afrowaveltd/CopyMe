@@ -19,7 +19,7 @@ přeloží bez chyb a varování, ale:
 
 Všechna rozhodovací logika, práce s tabulkami oddílů, čtení NTFS, plánování, kopírování,
 ověřování a nově i kontrola prázdnoty cílového disku otestovány **byly** – nad
-obrazovými soubory, 74 automatickými testy. Postup ověření na hardware je v
+obrazovými soubory, 95 automatickými testy. Postup ověření na hardware je v
 [TESTOVANI.md](TESTOVANI.md), část 6.
 
 ### 1b. Cílový disk musí být bez oddílů
@@ -36,6 +36,27 @@ USB flash disky bývají z výroby rozdělené – jako cílový disk je proto n
 bez předchozího vyčištění.
 
 ---
+
+## 1c. Převzetí zdrojového disku
+
+Nástroj si připojený zdrojový disk přebírá sám, ale má to hranice:
+
+* **Svazek s otevřeným souborem nelze uzamknout.** Nástroj cizí procesy neukončuje;
+  vypíše, který svazek drží, a nabídne opakování. Řešením je zavřít Průzkumník,
+  kancelářské aplikace a pozastavit antivirovou kontrolu.
+* **Svazky rozložené přes více fyzických disků** (spanned, striped, Storage Spaces)
+  nástroj odmítá – nelze je bezpečně převzít jako samostatný disk.
+* **Disk s používaným stránkovacím souborem** nelze uzamknout, a tedy ani převzít.
+  Takový disk by ostatně nebyl online instalací zákazníka.
+* **Zápisy, které Windows provedl před spuštěním nástroje** (při automatickém
+  připojení svazků), nelze vzít zpět ani zjistit. Nástroj zaručuje jen to, že od
+  okamžiku převzetí na zdroj nezapisuje.
+* **Pád procesu nebo výpadek napájení** obejde `finally`. Nástroj proto během migrace
+  nedrží žádné zámky (uvolní je ukončení procesu) a read-only atribut nastavuje
+  s `Persist = 0`, takže jej **restart počítače zruší**. Nejhorší následek je dočasně
+  read-only disk do restartu.
+* **Zavřené souborové systémy** na zdrojovém disku (zamčený BitLocker) se neodpojují –
+  není co vyprázdnit.
 
 ## 2. Souborové systémy
 

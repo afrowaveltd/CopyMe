@@ -10,7 +10,7 @@ namespace Afrowave.DiskMigrator.Platform.Windows;
 /// Physical drives are addressed exclusively through \\.\PhysicalDriveN - never through drive
 /// letters - so identity survives letter changes.
 /// </summary>
-public sealed class WindowsDiskPlatform : IDiskPlatform
+public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
 {
     private const int MaxDriveProbe = 32;
     private const int MissesBeforeStop = 8;
@@ -28,6 +28,7 @@ public sealed class WindowsDiskPlatform : IDiskPlatform
         ContentProbe = new WindowsContentProbe(_volumes);
         Wim = new DismWimService(_tools, _volumes);
         Boot = new WindowsBootConfigurator(_tools, _volumes);
+        SourceTakeover = new WindowsSourceTakeover(_volumes, this);
     }
 
     public string PlatformName => "Windows (fyzické disky)";
@@ -47,6 +48,8 @@ public sealed class WindowsDiskPlatform : IDiskPlatform
     public IWimReimageService Wim { get; }
 
     public IBootConfigurator Boot { get; }
+
+    public ISourceTakeoverService? SourceTakeover { get; }
 
     public IReadOnlyList<PhysicalDisk> EnumerateDisks()
     {
@@ -250,7 +253,10 @@ public sealed class WindowsDiskPlatform : IDiskPlatform
                 volume.TotalBytes,
                 volume.FreeBytes,
                 usage,
-                volume.Label));
+                volume.Label)
+            {
+                SpansMultipleDisks = volume.SpansMultipleDisks,
+            });
         }
 
         return new SafetyEnvironment
@@ -264,9 +270,18 @@ public sealed class WindowsDiskPlatform : IDiskPlatform
         };
     }
 
-    public bool TrySetDiskReadOnly(PhysicalDisk disk, bool readOnly)
+    public bool TrySetDiskReadOnly(PhysicalDisk disk, bool readOnly) =>
+        TrySetDiskReadOnlyCore(disk.Identity.Number, readOnly, out _);
+
+    bool IDiskWriteProtection.TrySetReadOnlyState(int diskNumber, bool readOnly, out string? error) =>
+        TrySetDiskReadOnlyCore(diskNumber, readOnly, out error);
+
+    bool IDiskWriteProtection.IsReadOnly(int diskNumber) => IsDeviceReadOnly(diskNumber);
+
+    private bool TrySetDiskReadOnlyCore(int diskNumber, bool readOnly, out string? error)
     {
-        string path = disk.Identity.DevicePath;
+        error = null;
+        string path = @"\\.\PhysicalDrive" + diskNumber;
 
         var handle = Native.CreateFile(
             path, Native.GenericRead | Native.GenericWrite, Native.FileShareRead | Native.FileShareWrite,
@@ -277,7 +292,11 @@ public sealed class WindowsDiskPlatform : IDiskPlatform
             handle.Dispose();
 
             // Clearing a read-only flag needs a write capable handle; setting it may not.
-            if (readOnly) return false;
+            if (readOnly)
+            {
+                error = "disk nelze otevřít pro zápis, nelze změnit jeho atributy";
+                return false;
+            }
 
             handle = Native.CreateFile(
                 path, Native.GenericRead, Native.FileShareRead | Native.FileShareWrite,
@@ -285,7 +304,9 @@ public sealed class WindowsDiskPlatform : IDiskPlatform
 
             if (handle.IsInvalid)
             {
+                int openError = Marshal.GetLastWin32Error();
                 handle.Dispose();
+                error = $"disk nelze otevřít (chyba {openError}: {Win32Error.Describe(openError)})";
                 return false;
             }
         }
@@ -304,8 +325,15 @@ public sealed class WindowsDiskPlatform : IDiskPlatform
             BitConverter.TryWriteBytes(buffer.AsSpan(8, 8), readOnly ? Native.DiskAttributeReadOnly : 0UL);
             BitConverter.TryWriteBytes(buffer.AsSpan(16, 8), Native.DiskAttributeReadOnly);
 
-            return Native.DeviceIoControl(handle, Native.IoctlDiskSetDiskAttributes,
-                buffer, buffer.Length, null, 0, out _, IntPtr.Zero);
+            if (Native.DeviceIoControl(handle, Native.IoctlDiskSetDiskAttributes,
+                    buffer, buffer.Length, null, 0, out _, IntPtr.Zero))
+            {
+                return true;
+            }
+
+            int ioctlError = Marshal.GetLastWin32Error();
+            error = $"IOCTL_DISK_SET_DISK_ATTRIBUTES selhal (chyba {ioctlError}: {Win32Error.Describe(ioctlError)})";
+            return false;
         }
     }
 

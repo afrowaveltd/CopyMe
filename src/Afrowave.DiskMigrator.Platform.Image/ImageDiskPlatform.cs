@@ -49,6 +49,7 @@ public sealed class ImageDiskPlatform : IDiskPlatform
         Tools = new NullToolRunner();
         Wim = new UnavailableWimService("simulované prostředí");
         Boot = new UnavailableBootConfigurator("simulované prostředí");
+        SourceTakeover = new SimulatedSourceTakeover(_disks);
     }
 
     public string PlatformName => "Simulované disky (obrazové soubory)";
@@ -70,6 +71,8 @@ public sealed class ImageDiskPlatform : IDiskPlatform
     public IWimReimageService Wim { get; set; }
 
     public IBootConfigurator Boot { get; set; }
+
+    public ISourceTakeoverService? SourceTakeover { get; set; }
 
     /// <summary>Set to true when the tool tried to open a disk for writing that it must not.</summary>
     public List<int> WriteAttempts { get; } = [];

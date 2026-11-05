@@ -174,7 +174,10 @@ internal sealed class CommandLineOptions
             Bezpečnost:
               * Disky vybírá vždy uživatel - nástroj žádný nevybere sám.
               * Cílový disk musí být bez oddílů; nástroj je nikdy nemaže.
-              * Zdrojový disk je otevřen výhradně pro čtení.
+              * Zdrojový disk nástroj sám převezme: svazky vyprázdní a odpojí,
+                disk přepne do režimu read-only a po skončení vše vrátí.
+                Technik nemusí nic odpojovat, ani když disk už má písmena jednotek.
+              * Zdrojový disk je po celou dobu migrace otevřen výhradně pro čtení.
               * Offline instalace Windows na zdrojovém disku zůstává volitelná.
               * Disky servisního počítače a disk, ze kterého nástroj běží, jsou chráněny.
               * Před zápisem se znovu ověří identita obou disků a prázdnost cíle.

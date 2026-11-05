@@ -2,7 +2,7 @@
 
 > ## ⚠️ EXPERIMENTÁLNÍ VERZE 1.0
 >
-> Nástroj je funkční a má za sebou 74 automatických testů, ale **nebyl spuštěn na
+> Nástroj je funkční a má za sebou 95 automatických testů, ale **nebyl spuštěn na
 > skutečném počítači s Windows a fyzickými disky**. Vrstva pro hardware, `DISM`,
 > `bcdboot` a start cílového systému vyžadují ověření na reálném stroji nebo ve VM.
 >
@@ -79,9 +79,12 @@ netvrdí, že výsledek bude bootovatelný, pokud to nedokáže připravit.
    Naopak **offline instalace Windows zákazníka zůstává běžně volitelná jako zdroj** –
    to je ostatně hlavní účel nástroje.
 
-2. **Zdrojový disk je pouze pro čtení.** Otevírá se výhradně s právem čtení a navíc se
-   přepne do režimu read-only na úrovni zařízení. Nástroj na něj nikdy nezapisuje – ani
-   při zmenšování, ani při kontrole.
+2. **Zdrojový disk je pouze pro čtení.** Nástroj si jej **sám převezme** – technik
+   nemusí nic odpojovat, i když Windows už disk připojil s písmeny jednotek. Svazky se
+   nejdřív vyprázdní a odpojí (aby na disku nezůstal nečistý souborový systém), teprve
+   pak se disk přepne do režimu read-only a změna se ověří. Na zdroj se přitom nikdy
+   nezapisuje – ani při zmenšování, ani při kontrole. Po skončení se vše vrátí:
+   read-only příznak zmizí (pokud jej nástroj nastavil) a svazky jsou zase dostupné.
 
 3. **Cílový disk se mění až po jednoznačném potvrzení.** Před prvním zápisem se znovu
    ověří identita obou disků (sériové číslo, velikost, velikost sektoru, otisk tabulky
@@ -154,7 +157,7 @@ src/
   Afrowave.DiskMigrator.Platform.Image/  disky nad obrazovými soubory (testy, simulace)
   Afrowave.DiskMigrator.Platform.Windows/ reálné disky, svazky, DISM, bcdboot
   Afrowave.DiskMigrator.Cli/             české terminálové uživatelské rozhraní
-tests/                                   automatické testy (74 testů)
+tests/                                   automatické testy (95 testů)
 tools/Afrowave.SampleDisks/              generátor simulovaných disků pro školení
 tools/windows-vm-test/                   testovací scénář pro Windows (VHDX + VM)
 docs/                                    dokumentace

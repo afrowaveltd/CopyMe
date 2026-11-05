@@ -22,6 +22,13 @@ public sealed class ExecutionOptions
 
     public bool KeepSourceReadOnlyFlag { get; init; }
 
+    /// <summary>
+    /// Set by the caller that already took the source disk over for read-only use (see
+    /// <see cref="ISourceTakeoverService"/>). The executor then does not change the flag itself
+    /// and leaves restoring it to that caller. The protection is still verified before writing.
+    /// </summary>
+    public bool SourceAlreadyProtected { get; init; }
+
     public TimeSpan VolumeWaitTimeout { get; init; } = TimeSpan.FromSeconds(45);
 }
 
@@ -113,16 +120,25 @@ public sealed class MigrationExecutor
                 }
             }
 
-            _reporter.Detail("Zdrojový disk přepínám do režimu pouze pro čtení.");
-            if (_platform.TrySetDiskReadOnly(sourceDisk, true))
+            if (options.SourceAlreadyProtected)
             {
-                sourceMarkedReadOnly = true;
-                _log.Write("STEP", "Zdrojový disk nastaven jako read-only na úrovni zařízení");
+                _reporter.Detail("Zdrojový disk je chráněn – převzetí proběhlo před analýzou.");
+                _log.Write("STEP", "Zdrojový disk chráněn volajícím (source takeover)");
             }
             else
             {
-                warnings.Add("Zdrojový disk se nepodařilo přepnout do režimu pouze pro čtení; bude otevřen pouze pro čtení.");
-                _log.Write("WARN", "Read-only atribut zdrojového disku nebylo možné nastavit");
+                _reporter.Detail("Zdrojový disk přepínám do režimu pouze pro čtení.");
+                if (_platform.TrySetDiskReadOnly(sourceDisk, true))
+                {
+                    sourceMarkedReadOnly = true;
+                    _log.Write("STEP", "Zdrojový disk nastaven jako read-only na úrovni zařízení");
+                }
+                else
+                {
+                    warnings.Add(
+                        "Zdrojový disk se nepodařilo přepnout do režimu pouze pro čtení; bude otevřen pouze pro čtení.");
+                    _log.Write("WARN", "Read-only atribut zdrojového disku nebylo možné nastavit");
+                }
             }
 
             _reporter.Detail("Otevírám zdrojový disk a kontroluji cílový disk (oba pouze pro čtení).");
@@ -161,6 +177,27 @@ public sealed class MigrationExecutor
                 throw new MigrationAbortedException(
                     "Zdrojový disk se od načtení plánu změnil (" + difference + "). Zápis nebyl zahájen.");
             }
+
+            // Never write while the source is not demonstrably protected. If the protection cannot
+            // be confirmed we stop - continuing would mean working on a false assumption.
+            var protectedSource = _platform.EnumerateDisks()
+                .FirstOrDefault(d => d.Identity.Number == sourceDisk.Identity.Number);
+
+            if (protectedSource is null)
+            {
+                throw new MigrationAbortedException(
+                    "Zdrojový disk po opětovném načtení zmizel. Zápis nebyl zahájen.");
+            }
+
+            if (!protectedSource.IsReadOnly)
+            {
+                _log.Write("REFUSE", "Zdrojový disk nehlásí režim pouze pro čtení");
+                throw new MigrationAbortedException(
+                    "Zdrojový disk nehlásí režim pouze pro čtení. Nelze zaručit, že se na něj nezapisuje, " +
+                    "proto migraci odmítáme. Zápis nebyl zahájen.");
+            }
+
+            _log.Write("VERIFY", "Zdrojový disk potvrzen jako read-only");
 
             _reporter.Detail("Identita obou disků potvrzena.");
             _log.Write("VERIFY", $"Identita potvrzena: cíl {actualTarget.Digest[..16]}, zdroj {actualSource.Digest[..16]}");

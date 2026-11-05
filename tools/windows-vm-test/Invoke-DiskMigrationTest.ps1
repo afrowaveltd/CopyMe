@@ -244,6 +244,36 @@ try {
 
     Invoke-DiskPart @("select disk $targetNumber", 'clean', 'exit') 'Vyčištění cílového disku' | Out-Null
 
+    # -------------------------------------------------------------- kontrola - obsazený svazek
+
+    Write-Step 'Kontrola: zdroj s otevřeným souborem musí být odmítnut'
+
+    # Windows drží na svazku otevřený popisovač -> FSCTL_LOCK_VOLUME musí selhat a nástroj
+    # musí migraci odmítnout, místo aby pokračoval bez ochrany zdroje.
+    $busyFile = Join-Path $dataRoot 'drzeny-soubor.txt'
+    Set-Content -LiteralPath $busyFile -Value 'test' -Encoding UTF8
+
+    $hold = $null
+    try {
+        $hold = [System.IO.File]::Open($busyFile, [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+
+        $busyLog = Join-Path $WorkDir 'busy-source.log'
+        $busyOutput = & $ExePath --source $sourceNumber --target $targetNumber --yes --log $busyLog 2>&1
+        $busyExit = $LASTEXITCODE
+
+        Assert-True ($busyExit -ne 0) 'Migrace s obsazeným zdrojem byla odmítnuta'
+        Assert-True (($busyOutput -join "`n") -match 'převzít|uzamknout|používán') 'Odmítnutí vysvětluje obsazený svazek'
+        Assert-True ([string](Get-Disk -Number $targetNumber).PartitionStyle -eq 'RAW') 'Cílový disk zůstal nedotčen'
+    }
+    catch {
+        Write-Fail "Test obsazeného svazku selhal: $($_.Exception.Message)"
+    }
+    finally {
+        if ($null -ne $hold) { $hold.Dispose() }
+        Remove-Item -LiteralPath $busyFile -Force -ErrorAction SilentlyContinue
+    }
+
     # -------------------------------------------------------------- kontrola - dry run
 
     Write-Step 'Kontrola: režim bez zápisu (--dry-run)'
@@ -253,6 +283,7 @@ try {
     Assert-True ($LASTEXITCODE -eq 0) 'Kontrolní režim doběhl bez chyby'
     Assert-True (($dryOutput -join "`n") -match 'SHA-256|Navržený postup|migrace') 'Kontrolní režim vypsal plán'
 
+    Start-Sleep -Seconds 2
     $styleAfterDryRun = [string](Get-Disk -Number $targetNumber).PartitionStyle
     Assert-True ($styleAfterDryRun -eq 'RAW') 'Kontrolní režim na cílový disk nic nezapsal'
 
@@ -336,8 +367,26 @@ try {
     Write-Note 'Bajtové srovnání celého VHDX se neprovádí - Windows do něj zapisuje vlastní metadata.'
     Write-Note 'Ochranu zdroje ověřují automatické testy nad obrazovými soubory (SHA-256 před/po).'
 
-    $sourceFilesStillThere = @(Get-ChildItem -LiteralPath "${sourceLetter}:\" -File -Recurse -ErrorAction SilentlyContinue)
-    Assert-True ($sourceFilesStillThere.Count -ge $expected.Count) 'Data na zdrojovém disku jsou stále dostupná'
+    # The tool must have handed the disk back: the original volume is mounted and readable again.
+    $sourceRoot = "${sourceLetter}:\"
+    $sourceAccessible = Test-Path -LiteralPath $sourceRoot
+    Assert-True $sourceAccessible "Svazek ${sourceLetter}: je po skončení opět dostupný"
+
+    if ($sourceAccessible) {
+        $sourceFilesStillThere = @(Get-ChildItem -LiteralPath $sourceRoot -File -Recurse -ErrorAction SilentlyContinue)
+        Assert-True ($sourceFilesStillThere.Count -ge $expected.Count) 'Data na zdrojovém disku jsou stále dostupná'
+
+        $stillWritable = $false
+        try {
+            $probe = Join-Path $sourceRoot 'zapisovatelnost.txt'
+            Set-Content -LiteralPath $probe -Value 'ok' -Encoding UTF8
+            Remove-Item -LiteralPath $probe -Force
+            $stillWritable = $true
+        }
+        catch { }
+
+        Assert-True $stillWritable 'Zdrojový disk je po migraci opět zapisovatelný'
+    }
 }
 catch {
     Write-Host "`nTest se nedokončil: $($_.Exception.Message)" -ForegroundColor Red

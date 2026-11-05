@@ -52,7 +52,14 @@ public sealed record MountedVolume(
     long TotalBytes,
     long FreeBytes,
     VolumeUsage Usage,
-    string? Label);
+    string? Label)
+{
+    /// <summary>
+    /// True when the volume is spread over more than one physical disk (spanned, striped or a
+    /// Storage Spaces member). Such a disk cannot be handled safely on its own.
+    /// </summary>
+    public bool SpansMultipleDisks { get; init; }
+}
 
 /// <summary>Why a disk must never be touched.</summary>
 public sealed record ProtectedDisk(int DiskNumber, string Reason);
@@ -202,6 +209,9 @@ public interface IDiskPlatform
     IWimReimageService Wim { get; }
 
     IBootConfigurator Boot { get; }
+
+    /// <summary>Takes a mounted source disk away from Windows for read-only use.</summary>
+    ISourceTakeoverService? SourceTakeover { get; }
 
     /// <summary>Best-effort: marks a whole disk read-only at the device level.</summary>
     bool TrySetDiskReadOnly(PhysicalDisk disk, bool readOnly);

@@ -19,6 +19,43 @@ Návod pro technika, který má přenést obsah disku na jiný disk.
 * Pro zmenšení oddílu: volné místo na jiném disku než zdrojovém a cílovém
   (podrobnosti v části 4).
 
+### Zdrojový disk převezme nástroj sám
+
+Zákazníkův disk bude po připojení k servisnímu počítači pravděpodobně **už
+rozpoznaný Windows** a bude mít přiřazená písmena (např. `E:` a `F:`). **Nic
+s tím nedělejte.** Nemusíte odpojovat oddíly, rušit písmena ani nic nastavovat.
+
+Ihned po výběru zdrojového disku si jej nástroj převezme:
+
+```
+  i    Převzím zdrojový disk pro čtení…
+  E::  data vyprázdněna do zařízení a souborový systém odpojen.
+  F::  data vyprázdněna do zařízení a souborový systém odpojen.
+  Zdrojový disk je nastaven jako pouze pro čtení a ověřeno.
+```
+
+Co se přitom stalo:
+
+* Windows vyprázdnil všechny nevyřízené zápisy do zařízení – tím je zaručeno, že
+  souborový systém disku je v konzistentním stavu.
+* Svazky se odpojily od souborového systému Windows.
+* Disk se přepnul do režimu pouze pro čtení, což nástroj ověřil.
+
+**Po skončení se vše vrátí:**
+
+```
+  Read-only příznak zdrojového disku zrušen – disk je opět zapisovatelný.
+  E:\ je opět dostupný.
+  F:\ je opět dostupný.
+```
+
+Pokud byl disk read-only už před migrací, **zůstane read-only** – nástroj mění jen
+to, co sám změnil.
+
+> **Proč ne rovnou read-only?** Kdyby se disk přepnul do režimu jen pro čtení jako
+> první, nevyřízené zápisy by selhaly uprostřed a na zákazníkově disku by zůstal
+> nečistý souborový systém. Proto se nejdřív uklidí a pak chrání.
+
 ### Důležité předpoklady
 
 * **Cílový disk musí být bez oddílů** – nový disk z výroby nebo disk, který už někdo
@@ -39,6 +76,7 @@ Návod pro technika, který má přenést obsah disku na jiný disk.
 * Nenabídne jako zdroj ani cíl disk servisního počítače, disk, ze kterého běží,
   ani disk s hibernačním či stránkovacím souborem běžícího systému.
 * Nezmění zavádění ani konfiguraci servisního počítače.
+* Neukončí žádný cizí program, aby si uvolnil cestu ke zdrojovému disku.
 * Neobchází šifrování, které nedokáže bezpečně zpřístupnit.
 * Netvrdí, že výsledný disk nastartuje, pokud zavádění neumí připravit.
 
@@ -313,6 +351,10 @@ AfrowaveDiskMigrator.exe --dry-run
 | Zpráva | Co to znamená a co dělat |
 |---|---|
 | `Nástroj musí běžet jako správce` | Spusťte EXE pravým tlačítkem → Spustit jako správce. |
+| `Zdrojový disk nelze bezpečně převzít` | Něco na zdrojovém disku drží otevřené soubory – nejčastěji Průzkumník, kancelářská aplikace nebo antivirová kontrola. Zavřete je a zvolte opakování. Na disky se přitom nic nezapsalo. |
+| `svazek nelze uzamknout – svazek je používán` | Totéž: na svazku je otevřený soubor. Nástroj cizí procesy sám neukončuje. |
+| `Disk je součástí svazku rozloženého přes více fyzických disků` | Spanned/striped svazek nebo Storage Spaces. Takový disk nástroj odmítá – nejde o bezpečnou samostatnou jednotku. |
+| `Read-only příznak zdrojového disku se nepodařilo zrušit` | Restartujte počítač – tím příznak zmizí (nastavuje se s `Persist = 0`). |
 | `Cílový disk není prázdný` | Disk obsahuje oddíly nebo zbytky tabulky. Nástroj je nemaže – vyberte jiný disk, nebo jej vyprázdněte mimo tento nástroj. |
 | `Disk N nelze pro tuto roli použít` | Následuje výpis důvodů (chráněný disk, oddíly na cíli, nejednoznačná tabulka…). |
 | `Obsah se na cílový disk nevejde ani po zmenšení` | Cílový disk je příliš malý. Zpráva u každého oddílu uvádí nejmenší možnou velikost. Použijte větší cílový disk. |

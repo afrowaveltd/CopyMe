@@ -21,6 +21,7 @@ internal static class Native
     public const uint IoctlVolumeGetVolumeDiskExtents = 0x00560000;
 
     public const uint FsctlLockVolume = 0x00090018;
+    public const uint FsctlUnlockVolume = 0x0009001C;
     public const uint FsctlDismountVolume = 0x00090020;
     public const uint FsctlAllowExtendedDasdIo = 0x00090083;
 

@@ -24,6 +24,14 @@ internal sealed class VolumeRecord
     public int DiskNumber => Extents.Count > 0 ? Extents[0].DiskNumber : -1;
 
     public long StartingOffset => Extents.Count > 0 ? Extents[0].StartingOffset : -1;
+
+    /// <summary>True when the volume lives on more than one physical disk.</summary>
+    public bool SpansMultipleDisks => Extents.Count > 1;
+
+    public bool HasFileSystem => !string.IsNullOrEmpty(FileSystemName);
+
+    /// <summary>Root path such as "E:\", or null when the volume has no drive letter.</summary>
+    public string? RootPath => DriveLetter is { } letter ? letter + ":\\" : null;
 }
 
 /// <summary>
@@ -225,6 +233,79 @@ internal sealed class WindowsVolumeService : IVolumeService
     {
         if (!Native.GetDiskFreeSpaceEx(rootPath, out ulong free, out _, out _)) return 0;
         return (long)free;
+    }
+
+    /// <summary>Outcome of flushing and detaching one volume.</summary>
+    public sealed record VolumeFlushResult(bool Success, string Message);
+
+    /// <summary>
+    /// Flushes pending writes and detaches the file system of one volume.
+    ///
+    /// The order is the documented one and it matters: the volume handle must be opened with no
+    /// sharing, then FSCTL_LOCK_VOLUME, then FSCTL_DISMOUNT_VOLUME. Locking fails while anybody
+    /// still holds an open file, which is exactly the safety property we want - we would rather
+    /// stop than dismount a volume that is in use.
+    /// </summary>
+    public VolumeFlushResult FlushAndDismount(VolumeRecord volume)
+    {
+        var handle = Native.CreateFile(
+            volume.GuidPath,
+            Native.GenericRead | Native.GenericWrite,
+            0,                                   // no sharing: nobody else may open it meanwhile
+            IntPtr.Zero,
+            Native.OpenExisting,
+            0,
+            IntPtr.Zero);
+
+        if (handle.IsInvalid)
+        {
+            int error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            return new VolumeFlushResult(false,
+                $"svazek nelze otevřít výhradně (chyba {error}: {Win32Error.Describe(error)}) – " +
+                "něco na něm má otevřené soubory");
+        }
+
+        using (handle)
+        {
+            if (!Native.DeviceIoControl(handle, Native.FsctlLockVolume, null, 0, null, 0, out _, IntPtr.Zero))
+            {
+                int error = Marshal.GetLastWin32Error();
+                return new VolumeFlushResult(false,
+                    $"svazek nelze uzamknout (chyba {error}: {Win32Error.Describe(error)}) – " +
+                    "svazek je používán");
+            }
+
+            // Lets raw I/O of the whole disk pass through afterwards.
+            Native.DeviceIoControl(handle, Native.FsctlAllowExtendedDasdIo, null, 0, null, 0, out _, IntPtr.Zero);
+
+            if (!Native.DeviceIoControl(handle, Native.FsctlDismountVolume, null, 0, null, 0, out _, IntPtr.Zero))
+            {
+                int error = Marshal.GetLastWin32Error();
+                Native.DeviceIoControl(handle, Native.FsctlUnlockVolume, null, 0, null, 0, out _, IntPtr.Zero);
+                return new VolumeFlushResult(false,
+                    $"svazek nelze odpojit (chyba {error}: {Win32Error.Describe(error)})");
+            }
+
+            Native.DeviceIoControl(handle, Native.FsctlUnlockVolume, null, 0, null, 0, out _, IntPtr.Zero);
+            return new VolumeFlushResult(true, "data vyprázdněna do zařízení a souborový systém odpojen");
+        }
+    }
+
+    /// <summary>Re-opens a volume so that Windows mounts it again at its usual place.</summary>
+    public bool TryRemount(VolumeRecord volume)
+    {
+        string? root = volume.RootPath;
+        if (root is null) return true;
+
+        try
+        {
+            return Directory.Exists(root);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
     }
 
     public bool TryDismountVolume(int diskNumber, long partitionStartBytes)

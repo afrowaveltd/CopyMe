@@ -137,43 +137,93 @@ internal static class Program
 
         if (sourceEvaluation is null) return ExitCodes.PlanRefused;
 
-        // The source disk is switched to read-only *before* anything looks inside it.
-        // Detecting the operating system means mounting its volumes; if the disk were still
-        // writable the running Windows could replay an NTFS journal or touch System Volume
-        // Information, changing the customer's disk before the migration even started.
-        bool sourceMarkedReadOnly = false;
-        if (platform.TrySetDiskReadOnly(sourceEvaluation.Disk, true))
+        // ---------------------------------------------------------- take the source over
+        //
+        // The customer disk is very often already mounted by Windows with drive letters. Before
+        // anything reads from it, it is taken away from Windows: every volume is flushed and
+        // detached, then the disk is switched to read-only and the change is verified.
+        ui.Line();
+        ui.Info("Převzím zdrojový disk pro čtení…");
+
+        var protection = SourceProtectionGuard.Acquire(
+            platform,
+            sourceEvaluation.Disk,
+            report => AskRetryTakeover(ui, report));
+
+        foreach (string step in protection.Steps)
         {
-            sourceMarkedReadOnly = true;
+            ui.Detail(step);
         }
-        else
+
+        foreach (string warning in protection.Warnings)
         {
-            ui.Warning(
-                "Zdrojový disk se nepodařilo přepnout do režimu pouze pro čtení. " +
-                "Obsah jeho svazků nebude prozkoumán a operační systém nemusí být rozpoznán.");
+            ui.Warning(warning);
         }
+
+        if (!protection.Success || protection.Session is null)
+        {
+            ui.Section("Zdrojový disk nelze bezpečně převzít");
+            foreach (string problem in protection.Problems)
+            {
+                ui.Error(problem);
+            }
+
+            log.Write("REFUSE", string.Join(" | ", protection.Problems));
+            return ExitCodes.SourceUnusable;
+        }
+
+        log.Write("STEP", "Zdrojový disk převzat pro čtení");
 
         try
         {
             return MigrateSelectedDisks(
                 ui, platform, options, log, cancellationToken,
-                evaluations, environment, targetStates, sourceEvaluation,
-                probeContents: sourceMarkedReadOnly);
+                evaluations, environment, targetStates, sourceEvaluation);
         }
         finally
         {
-            // Always hand the customer's disk back in its normal state.
-            if (sourceMarkedReadOnly && platform.TrySetDiskReadOnly(sourceEvaluation.Disk, false))
+            // Runs on success, on failure and on cancellation alike.
+            var release = SourceProtectionGuard.Release(protection.Session);
+
+            ui.Line();
+            if (release.Success)
             {
-                ui.Detail("Zdrojový disk vrácen do běžného režimu (read-only zrušen).");
+                foreach (string step in release.Steps)
+                {
+                    ui.Detail(step);
+                }
+
+                log.Write("STEP", "Zdrojový disk vrácen do původního stavu");
             }
-            else if (sourceMarkedReadOnly)
+            else
             {
-                ui.Warning("Read-only příznak zdrojového disku se nepodařilo zrušit – po restartu zmizí.");
+                ui.Section("Zdrojový disk se nepodařilo vrátit do původního stavu");
+                foreach (string problem in release.Problems)
+                {
+                    ui.Error(problem);
+                }
+
+                log.Write("WARN", string.Join(" | ", release.Problems));
             }
         }
     }
 
+    /// <summary>Explains why the takeover failed and offers another attempt.</summary>
+    private static bool AskRetryTakeover(ConsoleUi ui, SourceTakeoverReport report)
+    {
+        ui.Section("Zdrojový disk se nepodařilo převzít");
+        foreach (string problem in report.Problems)
+        {
+            ui.Error(problem);
+        }
+
+        ui.Line();
+        ui.Detail("Nejčastější příčina: některý program má na disku otevřený soubor.");
+        ui.Detail("Zavřete Průzkumník, kancelářské aplikace a pozastavte antivirovou kontrolu.");
+        ui.Detail("Na disky nebylo nic zapsáno.");
+
+        return ui.AskYesNo("Zkusit převzetí znovu?", defaultYes: true);
+    }
 
     /// <summary>
     /// Everything that happens once the operator has chosen the source disk: analysis,
@@ -188,15 +238,16 @@ internal static class Program
         IReadOnlyList<DiskEvaluation> evaluations,
         SafetyEnvironment environment,
         IReadOnlyDictionary<int, TargetInspection> targetStates,
-        DiskEvaluation sourceEvaluation,
-        bool probeContents)
+        DiskEvaluation sourceEvaluation)
     {
         var sourceIdentity = sourceEvaluation.Disk.Identity;
 
         ui.Line();
         ui.Info("Analyzuji zdrojový disk…");
 
-        var analysis = DiskAnalyzer.Analyze(sourceEvaluation.Disk, platform, probeContents);
+        // The disk is already read-only at this point, so mounting its volumes for the operating
+        // system probe can only ever be a read-only mount.
+        var analysis = DiskAnalyzer.Analyze(sourceEvaluation.Disk, platform, probeContents: true);
         PlanPresenter.ShowSourceDetail(ui, analysis);
 
         if (!analysis.IsUsable)
@@ -305,7 +356,9 @@ internal static class Program
             var dryReporter = new MigratorReporter(ui);
             var dryExecutor = new MigrationExecutor(platform, dryReporter, log);
             var dryResult = dryExecutor.Execute(plan, sourceEvaluation.Disk, targetEvaluation.Disk,
-                sourceFingerprint, targetFingerprint, new ExecutionOptions { DryRun = true }, cancellationToken);
+                sourceFingerprint, targetFingerprint,
+                new ExecutionOptions { DryRun = true, SourceAlreadyProtected = true },
+                cancellationToken);
 
             PlanPresenter.ShowResult(ui, dryResult);
             ui.Info("Kontrolní režim: na cílový disk nebylo zapsáno nic.");
@@ -350,6 +403,7 @@ internal static class Program
                 DryRun = false,
                 Verify = plan.VerificationEnabled,
                 ZeroFreeClusters = options.ZeroFreeClusters,
+                SourceAlreadyProtected = true,
             },
             cancellationToken);
 

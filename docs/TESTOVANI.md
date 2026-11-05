@@ -35,7 +35,7 @@ Aktuální výsledek:
 
 ```
 Afrowave DiskMigrator – test suite (74 testů)
-Výsledek: 80 prošlo, 0 selhalo, čas 0.45 s
+Výsledek: 95 prošlo, 0 selhalo, čas 0.45 s
 ```
 
 Testy nepoužívají žádnou testovací knihovnu – součástí projektu je malý runner
@@ -70,7 +70,27 @@ Testy nepoužívají žádnou testovací knihovnu – součástí projektu je ma
 | `NtfsDirtyFlag` | Rozpoznání příznaku „dirty“ v `$Volume` |
 | `NtfsRejectsGarbage` | Oddíl, který se jen vydává za NTFS, je odmítnut (ne odhadnut) |
 
-### 2.3 Role disků – seznamy „zdroj“ a „cíl“ (6 testů) – nové v této verzi
+### 2.3 Převzetí zdrojového disku (15 testů) – nové v této verzi
+
+| Test | Co ověřuje |
+|---|---|
+| `TakeOverSucceeds` | Převzetí připojeného disku projde a hlásí, co provedlo |
+| `TakeOverFailureLeavesNoSession` | Nepoužitelný svazek → odmítnuto, žádná relace, nic se nepsalo |
+| `RetryAfterFailureSucceeds` | Po uvolnění svazku druhý pokus projde |
+| `NoRetryWhenHopeless` | U neřešitelného stavu se na opakování neptá |
+| `RetryCanBeDeclined` | Technik může opakování odmítnout |
+| `RetryHonoursLimit` | Opakování se zastaví na limitu pokusů |
+| `UnavailableTakeoverRefused` | Bez podpory převzetí se migrace nespustí |
+| `ReleaseIsIdempotent` | Dvojí uvolnění nespadne a uvolní jen jednou |
+| `ReleaseFailureIsReported` | Selhání úklidu se hlásí, nevyhazuje výjimku |
+| `TakeOverFlipsReadOnlyAndRestores` | Převzetí nastaví read-only, úklid jej zase zruší |
+| `OriginallyReadOnlyStaysReadOnly` | Původně read-only disk zůstane read-only |
+| `ExecutorRefusesUnprotectedSource` | Vykonavatel odmítne zápis, když zdroj není prokazatelně read-only |
+| `EndToEndWithTakeover` | Celý sled převzetí → migrace → úklid; zdroj zůstane bajtově shodný |
+| `RefusedTakeoverStopsEverything` | Odmítnuté převzetí zastaví migraci, cíl zůstane nedotčen |
+| `CancelledMigrationStillReleases` | Přerušení migrace stále provede úklid a vrátí disk |
+
+### 2.4 Role disků – seznamy „zdroj“ a „cíl“ (6 testů) – nové v této verzi
 
 | Test | Co ověřuje |
 |---|---|
@@ -81,7 +101,7 @@ Testy nepoužívají žádnou testovací knihovnu – součástí projektu je ma
 | `UninspectedDiskHasNoRole` | Bez kontroly stavu se disk nenabídne v žádné roli |
 | `ReadOnlyDiskCanBeSource` | Read-only disk s oddíly zůstává platným zdrojem (ideální případ) |
 
-### 2.4 Cílový disk (12 testů) – nové v této verzi
+### 2.5 Cílový disk (12 testů)
 
 | Test | Co ověřuje |
 |---|---|
@@ -98,7 +118,7 @@ Testy nepoužívají žádnou testovací knihovnu – součástí projektu je ma
 | `SuperFloppyIsEmptyWithNote` | Souborový systém přímo na disku → prázdný disk s poznámkou |
 | `PartitionBeyondDiskReported` | Oddíl přesahující disk je stále definovaný oddíl |
 
-### 2.5 Bezpečnostní politika (10 testů)
+### 2.6 Bezpečnostní politika (10 testů)
 
 | Test | Co ověřuje |
 |---|---|
@@ -113,7 +133,7 @@ Testy nepoužívají žádnou testovací knihovnu – součástí projektu je ma
 | `SameDiskDetection` | Rozpoznání totožného disku podle sériového čísla a velikosti |
 | `PairValidation` | Validace dvojice hlásí všechny důvody najednou |
 
-### 2.6 Plánovač (18 testů)
+### 2.7 Plánovač (18 testů)
 
 | Test | Co ověřuje |
 |---|---|
@@ -136,7 +156,7 @@ Testy nepoužívají žádnou testovací knihovnu – součástí projektu je ma
 | `WindowsWithoutEspRefused` | GPT s Windows bez ESP → odmítnuto (nešel by připravit UEFI) |
 | `BootUnavailableRefused` | Chybí `bcdboot` → odmítnuto, netvrdíme bootovatelnost |
 
-### 2.7 Průběh v terminálu (5 testů)
+### 2.8 Průběh v terminálu (5 testů)
 
 | Test | Co ověřuje |
 |---|---|
@@ -146,7 +166,7 @@ Testy nepoužívají žádnou testovací knihovnu – součástí projektu je ma
 | `FractionClamped` | Záporná hodnota, >100 % a NaN se ošetří |
 | `NarrowTerminal` | Funguje i na 60znakovém terminálu |
 
-### 2.8 End-to-end nad obrazovými disky (10 testů)
+### 2.9 End-to-end nad obrazovými disky (10 testů)
 
 Tyto testy proženou celý pipeline – analýzu, plán, kopírování i ověření – nad
 skutečnými soubory, a porovnávají bajty.
@@ -166,7 +186,7 @@ skutečnými soubory, a porovnávají bajty.
 
 ---
 
-## 2.9 Ověření chování z příkazové řádky
+## 2.10 Ověření chování z příkazové řádky
 
 Nad rámec testů proběhlo ověření přes skutečné CLI v simulačním režimu:
 
@@ -322,7 +342,7 @@ Doporučený postup při prvním použití v praxi:
 ## 7. Opakování testů
 
 ```bash
-./build.sh test              # všech 80 testů
+./build.sh test              # všech 95 testů
 ./build.sh test Planner      # jen testy, jejichž název obsahuje "Planner"
 ./build.sh test Ntfs         # jen NTFS testy
 ```

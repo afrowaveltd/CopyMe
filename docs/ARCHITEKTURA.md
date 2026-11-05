@@ -90,6 +90,73 @@ cíl. Uživatel vidí důvod, takže rozumí, proč tam je.
 `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS` → číslo fyzického disku. Nepoužívá se písmeno
 jednotky jako identita.
 
+### 3.15 Převzetí již připojeného zdrojového disku
+
+V praxi je zákazníkův disk k servisnímu počítači připojený dřív, než technik spustí
+nástroj – Windows jej rozpozná a přiřadí mu písmena (např. `E:` a `F:`). Nástroj
+s tím počítá a **zdroj si sám převezme**; technik nemusí nic odpojovat ani měnit.
+
+Proč ne prostě „nastavit disk jako read-only“: připojený svazek má **živý souborový
+systém s nevyřízenými zápisy** (NTFS žurnál, USN, `System Volume Information`).
+Kdyby se disk přepnul do režimu jen pro čtení jako první, tyto zápisy by selhaly
+uprostřed a na zákazníkově disku by zůstal nečistý souborový systém. Proto se **nejdřív
+vyprázdní a odpojí, a teprve pak chrání.**
+
+Skutečné pořadí (pro každý svazek se souborovým systémem):
+
+| # | Operace | Proč právě tady |
+|---|---|---|
+| 1 | `CreateFile(\\.\GLOBALROOT\Device\HarddiskVolume… )` resp. `\\?\Volume{GUID}\`, `GENERIC_READ \| GENERIC_WRITE`, **share = 0** | Výhradní otevření. Selže, pokud kdokoli drží otevřený soubor – přesně tu pojistku chceme. |
+| 2 | `FSCTL_LOCK_VOLUME` | Uzamkne svazek. Dokumentovaně selže, dokud má někdo otevřené soubory. |
+| 3 | `FSCTL_ALLOW_EXTENDED_DASD_IO` | Umožní následné surové I/O celého disku. |
+| 4 | `FSCTL_DISMOUNT_VOLUME` | Vyprázdní nevyřízené zápisy do zařízení a odpojí souborový systém. |
+| 5 | `FSCTL_UNLOCK_VOLUME`, zavření handle | Zámek se uvolní; odpojený svazek zůstává odpojený do dalšího přístupu. |
+| 6 | `IOCTL_DISK_SET_DISK_ATTRIBUTES` s `DISK_ATTRIBUTE_READ_ONLY`, `Persist = 0` | Teprve teď, když už žádný zápis neběží. |
+| 7 | Ověření: pokus o otevření s `GENERIC_WRITE` musí selhat | Bez ověření bychom jen věřili, že ochrana platí. |
+
+Volumes bez souborového systému (MSR, zamčený BitLocker) se přeskakují – není co
+vyprázdnit.
+
+**Co nástroj záměrně nedělá:**
+
+* **Nemaže písmena jednotek.** Po odpojení Windows svazek při dalším přístupu připojí
+  znovu, a protože je disk read-only, bude to připojení jen pro čtení. Díky tomu
+  není po skončení co obnovovat.
+* **Nedrží zámky po celou migraci.** Držený zámek by znemožnil připojení svazku, které
+  potřebujeme pro rozpoznání operačního systému i pro `DISM`. Skutečnou zárukou je
+  atribut read-only na disku; uvolněný zámek tedy nic neztrácí – a navíc po pádu
+  procesu nezůstane viset.
+* **Nemění `NoAutoMount` v registru** servisního počítače.
+* **Neukončuje cizí procesy.** Když svazek nelze uzamknout, nástroj to řekne a nabídne
+  opakování.
+
+### 3.16 Navrácení disku Windows
+
+V `finally` – tedy po úspěchu, po chybě i po přerušení:
+
+1. Zruší se read-only příznak, **ale jen když jej nástroj sám nastavil**. Disk, který
+   byl read-only už před migrací, zůstane read-only.
+2. Ověří se, že disk je skutečně zase zapisovatelný.
+3. „Klepnutím“ na původní mount pointy se svazky nechají znovu připojit, aby je
+   technik viděl v Průzkumníkovi.
+4. Na zdrojový disk se přitom nikdy nezapisuje – mění se jen atributy a stav
+   připojení.
+
+Když úklid selže, nástroj vypíše konkrétní nápravu (otevřít jednotku ručně,
+restartovat počítač).
+
+**Pád procesu nebo výpadek napájení:** `finally` se nemusí provést. Proto nástroj
+během migrace **nedrží žádné zámky** (operační systém je uvolní s ukončením procesu)
+a read-only atribut nastavuje s `Persist = 0`, takže **restart počítače jej sám zruší**.
+Nejhorší následek pádu je tedy dočasně read-only disk do restartu.
+
+### 3.17 Co nástroj nemůže ovlivnit
+
+Windows mohl na zákazníkův disk zapisovat **už před spuštěním nástroje** – při
+automatickém připojení svazků (replay NTFS žurnálu, aktualizace `System Volume
+Information`, časová razítka). Nástroj to nemůže vzít zpět ani zjistit v plném
+rozsahu. Zaručuje pouze to, že **od okamžiku převzetí** na zdroj nezapíše.
+
 ### 3.2 Zdrojový disk pouze pro čtení
 
 Tři nezávislé vrstvy:
@@ -97,8 +164,8 @@ Tři nezávislé vrstvy:
 1. **Handle**: `CreateFile` se žádostí `GENERIC_READ` – bez práva zápisu. Rozhraní
    `IBlockReader` ani nemá metodu pro zápis; zapisovat lze jen přes `IBlockDevice`,
    které zdroj nikdy nedostane.
-0. **Ještě před analýzou.** Zdroj se přepne do read-only režimu **dřív, než se do něj
-   cokoli podívá**. Rozpoznání operačního systému totiž znamená svazky připojit; kdyby
+0. **Ještě před analýzou.** Zdroj se převezme a přepne do read-only režimu **dřív, než
+   se do něj cokoli podívá** (viz 3.15). Rozpoznání operačního systému totiž znamená svazky připojit; kdyby
    byl disk zapisovatelný, běžící Windows by při připojení mohl přehrát NTFS žurnál
    nebo aktualizovat `System Volume Information` – tedy změnit zákazníkův disk ještě
    před začátkem migrace. Pokud read-only režim nelze nastavit, nástroj obsah svazků
