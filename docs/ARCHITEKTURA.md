@@ -97,6 +97,13 @@ Tři nezávislé vrstvy:
 1. **Handle**: `CreateFile` se žádostí `GENERIC_READ` – bez práva zápisu. Rozhraní
    `IBlockReader` ani nemá metodu pro zápis; zapisovat lze jen přes `IBlockDevice`,
    které zdroj nikdy nedostane.
+0. **Ještě před analýzou.** Zdroj se přepne do read-only režimu **dřív, než se do něj
+   cokoli podívá**. Rozpoznání operačního systému totiž znamená svazky připojit; kdyby
+   byl disk zapisovatelný, běžící Windows by při připojení mohl přehrát NTFS žurnál
+   nebo aktualizovat `System Volume Information` – tedy změnit zákazníkův disk ještě
+   před začátkem migrace. Pokud read-only režim nelze nastavit, nástroj obsah svazků
+   vůbec nezkoumá (a upozorní, že operační systém nemusí rozpoznat).
+
 2. **Zařízení**: `IOCTL_DISK_SET_DISK_ATTRIBUTES` s `DISK_ATTRIBUTE_READ_ONLY`
    a **`Persist = 0`**. Windows pak odmítne zápis i z jiných procesů, ale atribut
    platí jen pro tuto relaci. Kdyby nástroj spadl nebo vypadl proud, restart jej

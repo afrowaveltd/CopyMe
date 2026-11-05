@@ -132,15 +132,71 @@ internal static class Program
 
         var sourceEvaluation = SelectDisk(ui, evaluations, targetStates, options.SourceDiskNumber,
             "Zadejte číslo ZDROJOVÉHO disku (pouze pro čtení)",
-            e => e.CanBeSource,
-            "Tento disk nelze použít jako zdroj.");
+            e => DiskRoleRules.CanServeAsSource(e, targetStates.GetValueOrDefault(e.Disk.Identity.Number)),
+            "Jako zdroj lze vybrat jen disk, který obsahuje oddíly.");
 
         if (sourceEvaluation is null) return ExitCodes.PlanRefused;
+
+        // The source disk is switched to read-only *before* anything looks inside it.
+        // Detecting the operating system means mounting its volumes; if the disk were still
+        // writable the running Windows could replay an NTFS journal or touch System Volume
+        // Information, changing the customer's disk before the migration even started.
+        bool sourceMarkedReadOnly = false;
+        if (platform.TrySetDiskReadOnly(sourceEvaluation.Disk, true))
+        {
+            sourceMarkedReadOnly = true;
+        }
+        else
+        {
+            ui.Warning(
+                "Zdrojový disk se nepodařilo přepnout do režimu pouze pro čtení. " +
+                "Obsah jeho svazků nebude prozkoumán a operační systém nemusí být rozpoznán.");
+        }
+
+        try
+        {
+            return MigrateSelectedDisks(
+                ui, platform, options, log, cancellationToken,
+                evaluations, environment, targetStates, sourceEvaluation,
+                probeContents: sourceMarkedReadOnly);
+        }
+        finally
+        {
+            // Always hand the customer's disk back in its normal state.
+            if (sourceMarkedReadOnly && platform.TrySetDiskReadOnly(sourceEvaluation.Disk, false))
+            {
+                ui.Detail("Zdrojový disk vrácen do běžného režimu (read-only zrušen).");
+            }
+            else if (sourceMarkedReadOnly)
+            {
+                ui.Warning("Read-only příznak zdrojového disku se nepodařilo zrušit – po restartu zmizí.");
+            }
+        }
+    }
+
+
+    /// <summary>
+    /// Everything that happens once the operator has chosen the source disk: analysis,
+    /// target selection, planning, confirmation and execution.
+    /// </summary>
+    private static int MigrateSelectedDisks(
+        ConsoleUi ui,
+        IDiskPlatform platform,
+        CommandLineOptions options,
+        IAuditLog log,
+        CancellationToken cancellationToken,
+        IReadOnlyList<DiskEvaluation> evaluations,
+        SafetyEnvironment environment,
+        IReadOnlyDictionary<int, TargetInspection> targetStates,
+        DiskEvaluation sourceEvaluation,
+        bool probeContents)
+    {
+        var sourceIdentity = sourceEvaluation.Disk.Identity;
 
         ui.Line();
         ui.Info("Analyzuji zdrojový disk…");
 
-        var analysis = DiskAnalyzer.Analyze(sourceEvaluation.Disk, platform, probeContents: true);
+        var analysis = DiskAnalyzer.Analyze(sourceEvaluation.Disk, platform, probeContents);
         PlanPresenter.ShowSourceDetail(ui, analysis);
 
         if (!analysis.IsUsable)
@@ -161,13 +217,11 @@ internal static class Program
 
         // ---------------------------------------------------------- target
 
-        var sourceIdentity = sourceEvaluation.Disk.Identity;
         var targetEvaluation = SelectDisk(ui, evaluations, targetStates, options.TargetDiskNumber,
             "Zadejte číslo CÍLOVÉHO disku (musí být bez oddílů)",
-            e => e.CanBeTarget
-                 && !DiskSafetyPolicy.AreSameDisk(e.Disk.Identity, sourceIdentity)
-                 && targetStates.TryGetValue(e.Disk.Identity.Number, out var state) && state.IsEmpty,
-            "Tento disk nelze použít jako cíl.");
+            e => DiskRoleRules.CanServeAsTarget(e, targetStates.GetValueOrDefault(e.Disk.Identity.Number))
+                 && !DiskSafetyPolicy.AreSameDisk(e.Disk.Identity, sourceIdentity),
+            "Jako cíl lze vybrat jen disk bez definovaných oddílů.");
 
         if (targetEvaluation is null) return ExitCodes.PlanRefused;
 
@@ -345,11 +399,16 @@ internal static class Program
 
         if (candidates.Count == 0)
         {
-            ui.Error("Žádný disk nevyhovuje zadání. Migraci nelze provést.");
+            bool forTarget = prompt.Contains("CÍLOVÉHO", StringComparison.Ordinal);
+
+            ui.Error(forTarget
+                ? "Žádný disk není bez oddílů, takže není kam migrovat."
+                : "Žádný disk neobsahuje oddíly, takže není co migrovat.");
 
             foreach (var evaluation in evaluations.Where(e => !e.IsProtected))
             {
-                ui.Detail($"Disk {evaluation.Disk.Identity.Number}: " + IneligibilityReason(evaluation, targetStates));
+                ui.Detail($"Disk {evaluation.Disk.Identity.Number}: " +
+                          IneligibilityReason(evaluation, targetStates, forTarget));
             }
 
             return null;
@@ -412,17 +471,24 @@ internal static class Program
 
     private static string IneligibilityReason(
         DiskEvaluation evaluation,
-        IReadOnlyDictionary<int, TargetInspection> targetStates)
+        IReadOnlyDictionary<int, TargetInspection> targetStates,
+        bool forTarget)
     {
         if (evaluation.IsProtected) return "chráněný disk servisního počítače";
-        if (evaluation.SourceBlockers.Count > 0) return evaluation.SourceBlockers[0];
 
-        if (targetStates.TryGetValue(evaluation.Disk.Identity.Number, out var inspection) && !inspection.IsEmpty)
+        var state = targetStates.GetValueOrDefault(evaluation.Disk.Identity.Number);
+        if (state is null) return "stav disku se nepodařilo zjistit";
+
+        if (forTarget)
         {
-            return "nelze použít jako cíl: " + inspection.ShortDescription;
+            if (state.State == TargetDiskState.Uncertain) return "nejednoznačný stav tabulky oddílů";
+            if (!evaluation.CanBeTarget) return evaluation.TargetBlockers.FirstOrDefault() ?? "nelze použít jako cíl";
+            return "obsahuje " + state.DefinedPartitionCount + " oddílů – může být jen zdrojem";
         }
 
-        return "nepoužitelný";
+        if (state.State == TargetDiskState.Uncertain) return "nejednoznačný stav tabulky oddílů";
+        if (state.State == TargetDiskState.Empty) return "neobsahuje žádné oddíly – může být jen cílem";
+        return evaluation.SourceBlockers.FirstOrDefault() ?? "nelze použít jako zdroj";
     }
 
     private static string Serial(DiskIdentity identity) =>

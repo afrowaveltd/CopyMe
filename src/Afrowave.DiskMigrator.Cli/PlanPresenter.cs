@@ -96,6 +96,9 @@ internal static class PlanPresenter
         foreach (var evaluation in evaluations.OrderBy(e => e.Disk.Identity.Number))
         {
             var identity = evaluation.Disk.Identity;
+            var state = targetStates.GetValueOrDefault(identity.Number);
+            var role = DiskRoleRules.Classify(evaluation, state);
+
             string status;
             ConsoleColor color;
 
@@ -104,31 +107,31 @@ internal static class PlanPresenter
                 status = "CHRÁNĚN – nelze použít";
                 color = ConsoleColor.DarkYellow;
             }
-            else if (!evaluation.CanBeSource)
-            {
-                status = "nedostupný";
-                color = ConsoleColor.Gray;
-            }
-            else if (targetStates.TryGetValue(identity.Number, out var inspection) && inspection.IsEmpty)
-            {
-                status = "zdroj i cíl";
-                color = ConsoleColor.Green;
-            }
-            else if (targetStates.TryGetValue(identity.Number, out var occupied))
-            {
-                status = $"zdroj (cíl ne: {occupied.ShortDescription})";
-                color = ConsoleColor.Yellow;
-            }
             else
             {
-                status = "zdroj";
-                color = ConsoleColor.Green;
+                switch (role)
+                {
+                    case DiskRole.Source:
+                        status = "zdroj";
+                        color = ConsoleColor.Green;
+                        break;
+                    case DiskRole.Target:
+                        status = "cíl";
+                        color = ConsoleColor.Green;
+                        break;
+                    default:
+                        status = state is null || state.State == TargetDiskState.Uncertain
+                            ? "nejednoznačný stav – nelze použít"
+                            : "nedostupný";
+                        color = ConsoleColor.Gray;
+                        break;
+                }
             }
 
             string model = identity.Model.Length == 0 ? "(neznámý)" : identity.Model;
             ui.WriteLine(
-                $"  {identity.Number,2}  {Clip(model, 30),-30} {MigrationPlanner.Format(identity.SizeBytes),10}  " +
-                $"{Clip(identity.BusType, 8),-8}  {status}",
+                $"  {identity.Number,2}  {Clip(model, 28),-28} {MigrationPlanner.Format(identity.SizeBytes),10}  " +
+                $"{Clip(identity.BusType, 7),-7}  {status}",
                 color);
 
             if (evaluation.IsProtected)
@@ -137,19 +140,29 @@ internal static class PlanPresenter
                 {
                     ui.WriteLine($"      └ {reason}", ConsoleColor.DarkGray);
                 }
+
+                continue;
             }
-            else
+
+            if (role == DiskRole.Source)
             {
-                foreach (string blocker in evaluation.SourceBlockers.Take(2))
-                {
-                    ui.WriteLine($"      └ nelze použít jako zdroj: {blocker}", ConsoleColor.DarkGray);
-                }
+                ui.WriteLine($"      └ obsahuje {state!.DefinedPartitionCount} oddílů – může být zdrojem",
+                    ConsoleColor.DarkGray);
+            }
+            else if (role == DiskRole.Target)
+            {
+                ui.WriteLine("      └ bez oddílů – může být cílem", ConsoleColor.DarkGray);
+            }
+            else if (state is not null && state.Reasons.Count > 0)
+            {
+                ui.WriteLine("      └ " + Clip(state.Reasons[0].Trim().TrimStart('•').Trim(), 70), ConsoleColor.DarkGray);
             }
         }
 
         ui.Line();
-        ui.Detail("Cílovým diskem může být jen disk bez definovaných oddílů.");
-        ui.Detail("Nástroj oddíly nikdy nemaže – pokud disk oddíly obsahuje, vyberte jiný.");
+        ui.Detail("Zdroj = disk, který obsahuje oddíly. Cíl = disk bez oddílů.");
+        ui.Detail("Nástroj oddíly nikdy nemaže – pokud cíl oddíly obsahuje, vyberte jiný disk.");
+        ui.Detail("Disky servisního počítače se nezobrazují jako zdroj ani cíl.");
     }
 
     public static void ShowSourceDetail(ConsoleUi ui, Core.Analysis.DiskAnalysis analysis)

@@ -56,21 +56,31 @@ Hned na začátku uvidíte přehled disků:
 ```
 Dostupné disky
 --------------
- #   Model / zařízení        Velikost  Rozhraní  Stav
- 0   Samsung SSD 970        500 GiB   NVMe      CHRÁNĚN – nelze použít
-     └ obsahuje systémový svazek běžícího servisního počítače
- 1   WDC WD5000AZLX          465 GiB   SATA      zdroj (cíl ne: obsahuje 4 oddílů)
- 2   CT240BX500SSD1          223 GiB   SATA      zdroj i cíl
+  #   Model / zařízení          Velikost  Rozhraní  Stav
+  0   Samsung SSD 970          500 GiB   NVMe      CHRÁNĚN – nelze použít
+      └ obsahuje systémový svazek běžícího servisního počítače
+  1   WDC WD5000AZLX            465 GiB   SATA      zdroj
+      └ obsahuje 4 oddílů – může být zdrojem
+  2   CT240BX500SSD1            223 GiB   SATA      cíl
+      └ bez oddílů – může být cílem
 
-  Cílovým diskem může být jen disk bez definovaných oddílů.
-  Nástroj oddíly nikdy nemaže – pokud disk oddíly obsahuje, vyberte jiný.
+  Zdroj = disk, který obsahuje oddíly. Cíl = disk bez oddílů.
+  Nástroj oddíly nikdy nemaže – pokud cíl oddíly obsahuje, vyberte jiný disk.
+  Disky servisního počítače se nezobrazují jako zdroj ani cíl.
 ```
 
-Ve sloupci **Stav** je rovnou vidět, které disky mohou být čím:
+Ve sloupci **Stav** je rovnou vidět, do kterého seznamu disk patří:
 
-* `CHRÁNĚN` – servisní počítač, nelze vybrat vůbec,
-* `zdroj i cíl` – disk bez oddílů, vhodný jako cíl,
-* `zdroj (cíl ne: …)` – obsahuje oddíly, takže může být jen zdrojem.
+| Stav | Význam |
+|---|---|
+| `zdroj` | Obsahuje oddíly – nabídne se jen jako zdroj. |
+| `cíl` | Je bez oddílů – nabídne se jen jako cíl. |
+| `CHRÁNĚN – nelze použít` | Servisní počítač. Nenabídne se vůbec. |
+| `nejednoznačný stav – nelze použít` | Poškozená nebo nesmyslná tabulka oddílů. Nenabídne se vůbec. |
+
+Seznamy **zdroj** a **cíl** jsou tedy ostře oddělené: v prvním se objeví jen disky
+s obsahem, ve druhém jen prázdné disky. Když máte připojený jeden plný a jeden nový
+disk, nabídne se v každém seznamu právě jedna položka.
 
 > Pokud se v seznamu neobjeví žádný chráněný disk, nástroj vás na to upozorní.
 > Zkontrolujte, že skutečně běžíte na servisním počítači, a pokračujte opatrně.
@@ -81,8 +91,16 @@ Ve sloupci **Stav** je rovnou vidět, které disky mohou být čím:
 
 ### Zdrojový disk
 
-Zadejte číslo disku, jehož obsah chcete přenést. Nástroj potom disk **pouze
-přečte** a zobrazí:
+Zadejte číslo disku, jehož obsah chcete přenést. Nabídnou se jen disky, které
+obsahují oddíly.
+
+Nástroj zdrojový disk **okamžitě přepne do režimu pouze pro čtení** – ještě než se
+do něj podívá. Důvod: rozpoznání operačního systému vyžaduje svazky připojit, a kdyby
+byl disk zapisovatelný, mohl by do něj běžící Windows sáhnout (přehrát NTFS žurnál,
+aktualizovat `System Volume Information`). Takže se na zákazníkův disk nezapíše ani
+při analýze. Po skončení se režim zase zruší.
+
+Následně nástroj zobrazí:
 
 * model, sériové číslo, velikost, velikost sektoru, rozhraní,
 * typ tabulky oddílů (GPT / MBR),
@@ -92,6 +110,7 @@ přečte** a zobrazí:
 ### Cílový disk
 
 Zadejte číslo disku, který se má stát novým diskem s přeneseným obsahem.
+Nabídnou se jen disky bez oddílů.
 
 Platí tři podmínky:
 
