@@ -166,6 +166,8 @@ try {
     $sourceNumber = Get-VirtualDiskNumber -ExpectedBytes ($SourceSizeMB * 1MB) -What 'zdroj'
     $targetNumber = Get-VirtualDiskNumber -ExpectedBytes ($TargetSizeMB * 1MB) -What 'cíl'
     Write-Ok "Zdrojový disk = PhysicalDrive$sourceNumber, cílový = PhysicalDrive$targetNumber"
+    Assert-True (-not (Get-Disk -Number $sourceNumber).IsOffline) 'Zdroj VHDX je před testem ONLINE'
+    Assert-True (-not (Get-Disk -Number $sourceNumber).IsReadOnly) 'Zdroj VHDX je před testem zapisovatelný'
 
     # ------------------------------------------------------------------ příprava zdroje
 
@@ -274,6 +276,26 @@ try {
         Remove-Item -LiteralPath $busyFile -Force -ErrorAction SilentlyContinue
     }
 
+    # -------------------------------------------------------------- původně READ_ONLY: beze změny
+
+    Write-Step 'Kontrola: původně READ_ONLY zdroj musí zůstat READ_ONLY'
+
+    Set-Disk -Number $sourceNumber -IsReadOnly $true
+    try {
+        Assert-True ((Get-Disk -Number $sourceNumber).IsReadOnly) 'VHDX před pokusem opravdu READ_ONLY'
+
+        $readOnlyLog = Join-Path $WorkDir 'already-read-only.log'
+        $roOutput = & $ExePath --source $sourceNumber --target $targetNumber --dry-run --log $readOnlyLog 2>&1
+        Assert-True ($LASTEXITCODE -eq 0) 'Dry-run s původně READ_ONLY zdrojem uspěl'
+        Assert-True ((Get-Disk -Number $sourceNumber).IsReadOnly) 'CopyMe zachoval původní READ_ONLY'
+        Assert-True (-not (Get-Disk -Number $sourceNumber).IsOffline) 'READ_ONLY nepřevedl disk do OFFLINE'
+    }
+    finally {
+        Set-Disk -Number $sourceNumber -IsReadOnly $false
+    }
+
+    Assert-True (-not (Get-Disk -Number $sourceNumber).IsReadOnly) 'VHDX lze vrátit do původního stavu'
+
     # -------------------------------------------------------------- kontrola - dry run
 
     Write-Step 'Kontrola: režim bez zápisu (--dry-run)'
@@ -286,6 +308,9 @@ try {
     Start-Sleep -Seconds 2
     $styleAfterDryRun = [string](Get-Disk -Number $targetNumber).PartitionStyle
     Assert-True ($styleAfterDryRun -eq 'RAW') 'Kontrolní režim na cílový disk nic nezapsal'
+    $afterDry = Get-Disk -Number $sourceNumber
+    Assert-True (-not $afterDry.IsReadOnly) 'Po dry-run znovu potvrzen původní zapisovatelný stav'
+    Assert-True (-not $afterDry.IsOffline) 'Po dry-run disk stále ONLINE'
 
     # -------------------------------------------------------------- skutečná migrace
 
@@ -356,12 +381,11 @@ try {
     Assert-True ([string](Get-Disk -Number $sourceNumber).PartitionStyle -eq 'GPT') 'Zdroj zůstal GPT'
 
     $sourceDisk = Get-Disk -Number $sourceNumber
-    if ($sourceDisk.PSObject.Properties['IsReadOnly']) {
-        Assert-True (-not $sourceDisk.IsReadOnly) 'Zdrojový disk nezůstal omylem v režimu read-only'
-    }
-    else {
-        Write-Note 'Vlastnost IsReadOnly není v této verzi Windows dostupná - zkontrolujte disk ručně.'
-    }
+    Assert-True (-not $sourceDisk.IsReadOnly) 'Zdrojový disk nezůstal omylem v režimu read-only'
+    Assert-True (-not $sourceDisk.IsOffline) 'Zdrojový disk nezůstal OFFLINE'
+    $sourceLetterRestored = @(Get-Partition -DiskNumber $sourceNumber |
+        Where-Object { $_.DriveLetter -eq $sourceLetter }).Count -eq 1
+    Assert-True $sourceLetterRestored "Původní písmeno ${sourceLetter}: zůstalo přidělené"
 
     # Porovnat lze jen data, která Windows nezmění (VHDX metadatové bloky se mění vždy).
     Write-Note 'Bajtové srovnání celého VHDX se neprovádí - Windows do něj zapisuje vlastní metadata.'
