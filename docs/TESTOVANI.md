@@ -34,8 +34,8 @@ Spuštění:
 Aktuální výsledek:
 
 ```
-Afrowave DiskMigrator – test suite (74 testů)
-Výsledek: 95 prošlo, 0 selhalo, čas 0.45 s
+Afrowave DiskMigrator – test suite (112 testů)
+Výsledek: 112 prošlo, 0 selhalo (GitHub Actions, Linux; Windows EXE byl sestaven)
 ```
 
 Testy nepoužívají žádnou testovací knihovnu – součástí projektu je malý runner
@@ -196,6 +196,26 @@ Nad rámec testů proběhlo ověření přes skutečné CLI v simulačním reži
 | Druhý běh na tentýž (nyní již naplněný) cíl | návratový kód **6**, výpis 4 nalezených oddílů, cílový disk nezměněn |
 | Interaktivní volba chráněného disku jako zdroje | odmítnuto, znovu se ptá, vypíše důvod |
 | Potvrzení jiným slovem než `ANO` | migrace se nespustí, návratový kód 0 |
+
+## 2.11 Windows API a bezpečnost převzetí (17 nových testů)
+
+Testy `WindowsSafetyProtocolTests` běží i na Linuxu: ověřují skutečný formát
+`SET_DISK_ATTRIBUTES` (40 bajtů, Version=16), `GET_DISK_ATTRIBUTES`,
+bitovou hodnotu READ_ONLY=0x2 vs. OFFLINE=0x1, jejich masky,
+`STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR` pro 512e/4Kn a správnou úpravu
+GUID cest pro `CreateFile`.
+
+Další testy na falešných svazcích ověřují **držení všech zámků**
+až do skutečného potvrzení read-only, odmítnutí neznámých/offline atributů,
+obnovu po selhání druhého zámku, rollback částečně aplikovaného IOCTL
+a zachování původních písmen jednotek.
+
+Tyto testy nevolají Windows kernel: pro `FSCTL_*` a skutečný VHDX
+je pořád nutný integrační test na Windows.
+GitHub Actions navíc sestavuje `win-x64` a kontroluje syntaxi PowerShell
+testovacího scénáře, **nikoli jeho vykonání**.
+
+---
 
 ## 3. Test integrity zdrojového disku
 
