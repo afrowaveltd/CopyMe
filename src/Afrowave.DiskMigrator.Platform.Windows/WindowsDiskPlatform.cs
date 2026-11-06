@@ -173,7 +173,7 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
         }
     }
 
-    private static bool TryGetDiskAttributes(
+    private bool TryGetDiskAttributes(
         int diskNumber, out WindowsDiskAttributes attributes, out string? error)
     {
         attributes = default;
@@ -185,7 +185,9 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
         if (handle.IsInvalid)
         {
             int openError = Marshal.GetLastWin32Error();
-            error = $"Nelze číst atributy disku (chyba {openError}: {Win32Error.Describe(openError)}).";
+            if (WindowsDiskStorageCmdlets.TryRead(diskNumber, _tools, out attributes, out error))
+                return true;
+            error = $"IOCTL nelze otevřít (chyba {openError}), Get-Disk: {error}";
             return false;
         }
 
@@ -194,14 +196,18 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
                 null, 0, buffer, buffer.Length, out int returned, IntPtr.Zero))
         {
             int ioctlError = Marshal.GetLastWin32Error();
-            error = $"IOCTL_DISK_GET_DISK_ATTRIBUTES selhal (chyba {ioctlError}: {Win32Error.Describe(ioctlError)}).";
+            if (WindowsDiskStorageCmdlets.TryRead(diskNumber, _tools, out attributes, out error))
+                return true;
+            error = $"IOCTL_DISK_GET_DISK_ATTRIBUTES selhal ({ioctlError}), Get-Disk: {error}";
             return false;
         }
 
         if (!WindowsDiskProtocol.TryDecodeGet(
                 buffer.AsSpan(0, Math.Clamp(returned, 0, buffer.Length)), out attributes))
         {
-            error = "IOCTL_DISK_GET_DISK_ATTRIBUTES vrátil neplatnou nebo neúplnou strukturu.";
+            if (WindowsDiskStorageCmdlets.TryRead(diskNumber, _tools, out attributes, out error))
+                return true;
+            error = "IOCTL vrátil neplatnou strukturu, Get-Disk: " + error;
             return false;
         }
 
@@ -328,7 +334,9 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
         if (handle.IsInvalid)
         {
             int openError = Marshal.GetLastWin32Error();
-            error = $"Nelze otevřít disk pro změnu atributů (chyba {openError}: {Win32Error.Describe(openError)}).";
+            if (WindowsDiskStorageCmdlets.TrySet(diskNumber, readOnly, _tools, out error))
+                return true;
+            error = $"Nelze otevřít disk pro IOCTL ({openError}), Set-Disk: {error}";
             return false;
         }
 
@@ -345,7 +353,9 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
             }
 
             int ioctlError = Marshal.GetLastWin32Error();
-            error = $"IOCTL_DISK_SET_DISK_ATTRIBUTES selhal (chyba {ioctlError}: {Win32Error.Describe(ioctlError)})";
+            if (WindowsDiskStorageCmdlets.TrySet(diskNumber, readOnly, _tools, out error))
+                return true;
+            error = $"IOCTL_DISK_SET_DISK_ATTRIBUTES selhal ({ioctlError}), Set-Disk: {error}";
             return false;
         }
     }
