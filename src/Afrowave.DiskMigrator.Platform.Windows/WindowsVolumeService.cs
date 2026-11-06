@@ -38,8 +38,20 @@ internal sealed class VolumeRecord
 /// Mounting, dismounting and enumerating volumes of physical disks through the Windows
 /// volume manager. Used both for inspection and for handing partitions to DISM and bcdboot.
 /// </summary>
-internal sealed class WindowsVolumeService : IVolumeService
+internal interface ISourceVolumeLock : IDisposable;
+
+/// <summary>Injectable volume takeover API so locking/rollback can be tested without Windows.</summary>
+internal interface IWindowsTakeoverVolumes
 {
+    IReadOnlyList<VolumeRecord> EnumerateForTakeover();
+    WindowsVolumeService.VolumeFlushResult FlushAndLock(VolumeRecord volume, out ISourceVolumeLock? volumeLock);
+    bool TryRemount(VolumeRecord volume);
+}
+
+internal sealed class WindowsVolumeService : IVolumeService, IWindowsTakeoverVolumes
+{
+    public IReadOnlyList<VolumeRecord> EnumerateForTakeover() => Enumerate();
+
     private static readonly char[] CandidateLetters =
         ['Z', 'Y', 'X', 'W', 'V', 'U', 'T', 'S', 'R', 'Q', 'P', 'O', 'N', 'M', 'L', 'K'];
 
@@ -184,8 +196,16 @@ internal sealed class WindowsVolumeService : IVolumeService
 
     public void DismountVolume(char driveLetter)
     {
+        // NEVER delete an existing customer drive letter. Only release temporary
+        // letters allocated through MountVolume by this service instance.
+        if (!_mounted.ContainsKey(driveLetter)) return;
+
         string mountPoint = driveLetter + ":\\";
-        Native.DeleteVolumeMountPoint(mountPoint);
+        if (!Native.DeleteVolumeMountPoint(mountPoint))
+        {
+            int error = Marshal.GetLastWin32Error();
+            throw new IOException($"Dočasné písmeno {driveLetter}: nelze uvolnit (chyba {error}).");
+        }
         _mounted.Remove(driveLetter);
     }
 
@@ -235,61 +255,77 @@ internal sealed class WindowsVolumeService : IVolumeService
         return (long)free;
     }
 
-    /// <summary>Outcome of flushing and detaching one volume.</summary>
+    /// <summary>Outcome of locking/flush and dismount.</summary>
     public sealed record VolumeFlushResult(bool Success, string Message);
 
-    /// <summary>
-    /// Flushes pending writes and detaches the file system of one volume.
-    ///
-    /// The order is the documented one and it matters: the volume handle must be opened with no
-    /// sharing, then FSCTL_LOCK_VOLUME, then FSCTL_DISMOUNT_VOLUME. Locking fails while anybody
-    /// still holds an open file, which is exactly the safety property we want - we would rather
-    /// stop than dismount a volume that is in use.
-    /// </summary>
-    public VolumeFlushResult FlushAndDismount(VolumeRecord volume)
+    private sealed class LockedSourceVolume(SafeFileHandle handle) : ISourceVolumeLock
     {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            try
+            {
+                if (!handle.IsInvalid)
+                    Native.DeviceIoControl(handle, Native.FsctlUnlockVolume,
+                        null, 0, null, 0, out _, IntPtr.Zero);
+            }
+            finally
+            {
+                handle.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hold FSCTL_LOCK_VOLUME all the way through the read-only attribute transition.
+    /// FSCTL_LOCK_VOLUME flushes pending writes. Unlike dismount+unlock, the live
+    /// handle prevents another process from remounting a writable filesystem in between.
+    /// Caller MUST dispose volumeLock on every path.
+    /// </summary>
+    public VolumeFlushResult FlushAndLock(VolumeRecord volume, out ISourceVolumeLock? volumeLock)
+    {
+        volumeLock = null;
+        // Microsoft documents FILE_SHARE_READ | FILE_SHARE_WRITE for volume FSCTL handles.
         var handle = Native.CreateFile(
             volume.GuidPath,
             Native.GenericRead | Native.GenericWrite,
-            0,                                   // no sharing: nobody else may open it meanwhile
-            IntPtr.Zero,
-            Native.OpenExisting,
-            0,
-            IntPtr.Zero);
+            Native.FileShareRead | Native.FileShareWrite,
+            IntPtr.Zero, Native.OpenExisting, 0, IntPtr.Zero);
 
         if (handle.IsInvalid)
         {
             int error = Marshal.GetLastWin32Error();
             handle.Dispose();
             return new VolumeFlushResult(false,
-                $"svazek nelze otevřít výhradně (chyba {error}: {Win32Error.Describe(error)}) – " +
+                $"svazek nelze otevřít (chyba {error}: {Win32Error.Describe(error)})");
+        }
+
+        if (!Native.DeviceIoControl(handle, Native.FsctlLockVolume,
+                null, 0, null, 0, out _, IntPtr.Zero))
+        {
+            int error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            return new VolumeFlushResult(false,
+                $"svazek nelze uzamknout (chyba {error}: {Win32Error.Describe(error)}) – " +
                 "něco na něm má otevřené soubory");
         }
 
-        using (handle)
+        var locked = new LockedSourceVolume(handle);
+        if (!Native.DeviceIoControl(handle, Native.FsctlDismountVolume,
+                null, 0, null, 0, out _, IntPtr.Zero))
         {
-            if (!Native.DeviceIoControl(handle, Native.FsctlLockVolume, null, 0, null, 0, out _, IntPtr.Zero))
-            {
-                int error = Marshal.GetLastWin32Error();
-                return new VolumeFlushResult(false,
-                    $"svazek nelze uzamknout (chyba {error}: {Win32Error.Describe(error)}) – " +
-                    "svazek je používán");
-            }
-
-            // Lets raw I/O of the whole disk pass through afterwards.
-            Native.DeviceIoControl(handle, Native.FsctlAllowExtendedDasdIo, null, 0, null, 0, out _, IntPtr.Zero);
-
-            if (!Native.DeviceIoControl(handle, Native.FsctlDismountVolume, null, 0, null, 0, out _, IntPtr.Zero))
-            {
-                int error = Marshal.GetLastWin32Error();
-                Native.DeviceIoControl(handle, Native.FsctlUnlockVolume, null, 0, null, 0, out _, IntPtr.Zero);
-                return new VolumeFlushResult(false,
-                    $"svazek nelze odpojit (chyba {error}: {Win32Error.Describe(error)})");
-            }
-
-            Native.DeviceIoControl(handle, Native.FsctlUnlockVolume, null, 0, null, 0, out _, IntPtr.Zero);
-            return new VolumeFlushResult(true, "data vyprázdněna do zařízení a souborový systém odpojen");
+            int error = Marshal.GetLastWin32Error();
+            locked.Dispose();
+            return new VolumeFlushResult(false,
+                $"svazek nelze odpojit (chyba {error}: {Win32Error.Describe(error)})");
         }
+
+        // The volume stays locked until the caller has set and verified disk read-only.
+        volumeLock = locked;
+        return new VolumeFlushResult(true, "zápisy vyprázdněny, svazek odpojen a uzamčen");
     }
 
     /// <summary>Re-opens a volume so that Windows mounts it again at its usual place.</summary>
