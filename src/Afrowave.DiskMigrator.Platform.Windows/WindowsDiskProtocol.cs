@@ -77,3 +77,35 @@ public static class WindowsStorageAlignmentProtocol
         return true;
     }
 }
+
+/// <summary>
+/// Cross-platform decoder for the Win32 DISK_GEOMETRY_EX prefix (DISK_GEOMETRY + DiskSize).
+/// DISK_GEOMETRY: Cylinders [0..7], MediaType [8..11], TracksPerCylinder [12..15],
+/// SectorsPerTrack [16..19], BytesPerSector [20..23], then DiskSize [24..31].
+/// </summary>
+public static class WindowsDiskGeometryProtocol
+{
+    public const int MinimumLength = 32;
+
+    public static bool TryDecode(ReadOnlySpan<byte> data, out long diskSize, out int logicalSectorSize)
+    {
+        diskSize = 0;
+        logicalSectorSize = 0;
+
+        if (data.Length < MinimumLength) return false;
+
+        // Offset 16 is SectorsPerTrack (often 63) -- never use it as BytesPerSector.
+        int sectorSize = BinaryPrimitives.ReadInt32LittleEndian(data.Slice(20, 4));
+        long size = BinaryPrimitives.ReadInt64LittleEndian(data.Slice(24, 8));
+
+        if (sectorSize is < 512 or > 65536 ||
+            (sectorSize & (sectorSize - 1)) != 0 ||
+            size <= 0 || size % sectorSize != 0)
+            return false;
+
+        diskSize = size;
+        logicalSectorSize = sectorSize;
+        return true;
+    }
+}
+
