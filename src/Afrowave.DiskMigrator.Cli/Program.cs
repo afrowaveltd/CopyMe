@@ -104,7 +104,18 @@ internal static class Program
     {
         // ---------------------------------------------------------- disk inventory
 
-        var environment = platform.GetSafetyEnvironment();
+        SafetyEnvironment environment;
+        try
+        {
+            environment = platform.GetSafetyEnvironment();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ui.Error("Nelze bezpečně vyhodnotit systémové svazky a aktivní stránkovací soubory: " + ex.Message);
+            ui.Info("Žádný disk nebyl otevřen pro zápis. Ověřte správní oprávnění a zkuste operaci znovu.");
+            return ExitCodes.SourceUnusable;
+        }
+
         var disks = platform.EnumerateDisks();
 
         if (disks.Count == 0)
@@ -119,7 +130,8 @@ internal static class Program
         var targetStates = InspectTargetStates(platform, evaluations);
 
         PlanPresenter.ShowDiskList(ui, evaluations, targetStates, "Dostupné disky");
-        ui.Detail("Disky označené CHRÁNĚN patří servisnímu počítači. Nelze je použít jako zdroj ani jako cíl.");
+        ui.Detail("CHRÁNĚN = systémový disk, disk s běžící aplikací nebo nepodporovaný kontejner.");
+        ui.Detail("Nedostupný disk zobrazuje důvod; samotné připojení přes USB ochranu neobchází.");
 
         var protectedDisks = evaluations.Where(e => e.IsProtected).ToList();
         if (protectedDisks.Count == 0)
