@@ -141,11 +141,12 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
 
                 bool attributesKnown = TryGetDiskAttributes(
                     deviceNumber, out var attributes, out var attributeError);
-                // Unknown attributes and OFFLINE status must not be treated as a usable target.
-                bool isContainer = busType == 16 || !attributesKnown || attributes.IsOffline;
-                string? containerReason = busType == 16 ? "disk je součástí Storage Spaces"
-                    : !attributesKnown ? "atributy disku nelze spolehlivě přečíst: " + attributeError
-                    : attributes.IsOffline ? "disk je offline" : null;
+                // Unknown attributes do not imply a container or offline disk.
+                // They remain a hard blocker for BOTH source and target, with the actual error shown.
+                bool isContainer = busType == 16;
+                string? containerReason = isContainer ? "disk je součástí Storage Spaces" : null;
+                string? unavailable = !attributesKnown
+                    ? "nelze ověřit stav disku (IOCTL ani Get-Disk): " + attributeError : null;
 
                 bool isReadOnly = attributesKnown && attributes.IsReadOnly;
 
@@ -162,6 +163,8 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
                         removable,
                         NativeParsers.DescribeBusType(busType)),
                     IsReadOnly = isReadOnly,
+                    IsOffline = attributesKnown && attributes.IsOffline,
+                    AvailabilityProblem = unavailable,
                     IsContainerMember = isContainer,
                     ContainerReason = containerReason,
                 };
