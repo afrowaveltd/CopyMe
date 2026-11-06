@@ -7,6 +7,51 @@ namespace Afrowave.DiskMigrator.Tests;
 /// <summary>Cross-platform tests for real Windows IOCTL layouts and the safety state machine.</summary>
 public static class WindowsSafetyProtocolTests
 {
+    [Test("DISK_GEOMETRY_EX reads BytesPerSector at offset 20, not SectorsPerTrack at offset 16")]
+    public static void GeometryDecodesSectorSizeNotTrackCount()
+    {
+        byte[] b = new byte[WindowsDiskGeometryProtocol.MinimumLength];
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(16, 4), 63); // CHS: sectors/track
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(20, 4), 512); // actual logical sector size
+        BinaryPrimitives.WriteInt64LittleEndian(b.AsSpan(24, 8), 1_000_204_886_016L);
+
+        Assert.True(WindowsDiskGeometryProtocol.TryDecode(b, out long size, out int sectorSize),
+            "valid USB disk geometry");
+        Assert.Equal(512, sectorSize, "sector size must not be 63");
+        Assert.Equal(1_000_204_886_016L, size, "disk size is at offset 24");
+    }
+
+    [Test("DISK_GEOMETRY_EX also accepts valid native 4K-sector disks")]
+    public static void GeometrySupports4Kn()
+    {
+        byte[] b = new byte[WindowsDiskGeometryProtocol.MinimumLength];
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(16, 4), 63);
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(20, 4), 4096);
+        BinaryPrimitives.WriteInt64LittleEndian(b.AsSpan(24, 8), 4096L * 4096);
+
+        Assert.True(WindowsDiskGeometryProtocol.TryDecode(b, out _, out int sectorSize), "4Kn geometry");
+        Assert.Equal(4096, sectorSize, "4Kn logical sector size");
+    }
+
+    [Test("Malformed or truncated DISK_GEOMETRY_EX cannot supply guessed sector sizes")]
+    public static void GeometryRejectsMalformedBuffers()
+    {
+        byte[] b = new byte[WindowsDiskGeometryProtocol.MinimumLength];
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(16, 4), 63);
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(20, 4), 512);
+        BinaryPrimitives.WriteInt64LittleEndian(b.AsSpan(24, 8), 512L * 4096);
+
+        Assert.False(WindowsDiskGeometryProtocol.TryDecode(b.AsSpan(0, 31), out _, out _),
+            "truncated buffer");
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(20, 4), 63);
+        Assert.False(WindowsDiskGeometryProtocol.TryDecode(b, out _, out _),
+            "invalid sector size");
+        BinaryPrimitives.WriteInt32LittleEndian(b.AsSpan(20, 4), 512);
+        BinaryPrimitives.WriteInt64LittleEndian(b.AsSpan(24, 8), -1);
+        Assert.False(WindowsDiskGeometryProtocol.TryDecode(b, out _, out _),
+            "negative capacity");
+    }
+
     [Test("READ_ONLY must be 0x2 and OFFLINE must be 0x1")]
     public static void DiskAttributeConstants()
     {
