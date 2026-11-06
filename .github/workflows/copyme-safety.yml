@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - fix/windows-disk-safety-protocol-20261106
+      - fix/windows-usb-disk-inventory-20261106
   pull_request:
 
 jobs:
