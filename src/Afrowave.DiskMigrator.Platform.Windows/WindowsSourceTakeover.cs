@@ -131,6 +131,14 @@ internal sealed class WindowsSourceTakeover : ISourceTakeoverService
 
             if (!_protection.TrySetReadOnlyState(diskNumber, true, out string? setError))
             {
+                // Even a failed IOCTL may have changed the state. Query and roll back
+                // rather than leaving a customer disk unexpectedly read-only.
+                if (_protection.TryGetAttributes(diskNumber, out var uncertain, out _) &&
+                    uncertain.IsReadOnly &&
+                    !_protection.TrySetReadOnlyState(diskNumber, false, out var undoError))
+                {
+                    warnings.Add("POZOR: ochranu disku se nepodařilo vrátit: " + undoError);
+                }
                 problems.Add("Nepodařilo se zapnout ochranu zdroje: " + setError);
                 return Fail(steps, problems, warnings, canRetry: true);
             }
@@ -154,6 +162,19 @@ internal sealed class WindowsSourceTakeover : ISourceTakeoverService
         {
             for (int i = locks.Count - 1; i >= 0; i--)
                 locks[i].Dispose();
+
+            // On an unsuccessful takeover some volumes might already have been
+            // dismounted. Restore their original mount points before returning.
+            if (session is null)
+            {
+                foreach (var volume in dismounted)
+                {
+                    if (!_volumes.TryRemount(volume))
+                        warnings.Add("Nepodařilo se znovu připojit " +
+                            (volume.RootPath ?? volume.GuidPath) +
+                            "; zkontrolujte jej ve Správě disků.");
+                }
+            }
         }
     }
 
