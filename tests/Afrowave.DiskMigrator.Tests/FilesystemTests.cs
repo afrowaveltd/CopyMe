@@ -107,7 +107,7 @@ public static class FilesystemTests
         using var reader = new MemoryBlockDeviceFrom(image);
         using var volume = NtfsVolume.Open(reader, 0, image.Length);
         Assert.Equal(1024, SyntheticNtfs.RecordSize, "synthetic record size");
-        Assert.Equal(1024L * SyntheticNtfs.RecordSize / 1024, 1024L, "MFT record size sanity");
+        Assert.Equal(1024L, volume.Info.TotalClusters, "allocation map from canonical MFT");
         Assert.False(volume.Info.IsDirty, "canonical header remains readable");
     }
 
