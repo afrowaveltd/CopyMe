@@ -54,6 +54,15 @@ internal sealed class WindowsSourceTakeover : ISourceTakeoverService
         int diskNumber = disk.Identity.Number;
         var allVolumes = _volumes.EnumerateForTakeover();
 
+        // If a volume could not be associated with a physical disk, it MIGHT
+        // belong to the customer source. Never guess and skip its lock/flush.
+        if (allVolumes.Any(v => v.ExtentsUnavailable))
+        {
+            problems.Add("Nelze určit fyzické umístění všech připojených svazků. " +
+                         "Abychom nevynechali zdrojový svazek, převzetí odmítáme.");
+            return Fail(steps, problems, warnings, canRetry: false);
+        }
+
         // ---------------------------------------------------------- refused configurations
 
         var spanning = allVolumes
