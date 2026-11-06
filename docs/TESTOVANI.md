@@ -303,11 +303,13 @@ Toto jsou **jediné** oblasti, které v tomto prostředí ověřit nešlo, a dop
 Nejbezpečnější první test: dva **virtuální disky** (VHDX) připojené k virtuálnímu počítači.
 
 ```
-1. Vytvořit VM s Windows 10/11 na disku A (60 GB).
-2. Připojit prázdný disk B (40 GB) – menší než A.
-3. Spustit nástroj uvnitř VM, vybrat A jako zdroj a B jako cíl.
-4. Projít celý plán, potvrdit, sledovat průběh a výsledek kontroly.
-5. Vypnout VM, odpojit A, nastartovat z B.
+1. Vytvořit zákaznickou VM s Windows na disku A (60 GB), připravit data a vypnout ji.
+2. Vytvořit samostatnou servisní VM s vlastním Windows na disku C.
+3. Připojit vypnutý disk A a prázdný disk B (40 GB) do servisní VM.
+4. CopyMe spustit **v servisní VM**, kde je C chráněný systém, A offline zdroj
+   (ve smyslu neběžící instalace Windows, nikoli atribut DISK_ATTRIBUTE_OFFLINE) a B cíl.
+5. Projít dry-run, migrovat A → B a ověřit navrácení stavu zdroje.
+6. Vypnout servisní VM, odpojit A; připojit do původní VM pouze B a ověřit boot.
 ```
 
 Tím se ověří celý řetězec včetně `DISM`, `bcdboot` a startu systému – a přitom
