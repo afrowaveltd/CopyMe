@@ -99,6 +99,15 @@ public static class WindowsSafetyProtocolTests
         Assert.False(WindowsStorageAlignmentProtocol.TryDecode(d.AsSpan(0, 27), out _, out _), "truncated descriptor");
     }
 
+    [Test("CreateFile must open volume GUID device, not root path with trailing slash")]
+    public static void VolumeGuidDevicePath()
+    {
+        Assert.Equal(@"\\?\Volume{1234}", WindowsVolumeService.ToDevicePath(@"\\?\Volume{1234}\"),
+            "strip trailing slash only for device CreateFile");
+        Assert.Equal(@"\\.\E:", WindowsVolumeService.ToDevicePath(@"\\.\E:"),
+            "direct volume device path stays intact");
+    }
+
     [Test("An unowned drive letter is never removed by temporary-volume cleanup")]
     public static void OriginalDriveLetterIsNotRemoved()
     {
