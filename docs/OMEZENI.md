@@ -19,7 +19,7 @@ přeloží bez chyb a varování, ale:
 
 Všechna rozhodovací logika, práce s tabulkami oddílů, čtení NTFS, plánování, kopírování,
 ověřování a nově i kontrola prázdnoty cílového disku otestovány **byly** – nad
-obrazovými soubory, 95 automatickými testy. Postup ověření na hardware je v
+obrazovými soubory a deterministickými modely Windows API, 112 automatickými testy. Postup ověření na hardware je v
 [TESTOVANI.md](TESTOVANI.md), část 6.
 
 ### 1b. Cílový disk musí být bez oddílů
