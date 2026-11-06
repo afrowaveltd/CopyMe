@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Afrowave.DiskMigrator.Core\Afrowave.DiskMigrator.Core.csproj" />
     <ProjectReference Include="..\..\src\Afrowave.DiskMigrator.Platform.Image\Afrowave.DiskMigrator.Platform.Image.csproj" />
+    <ProjectReference Include="..\..\src\Afrowave.DiskMigrator.Platform.Windows\Afrowave.DiskMigrator.Platform.Windows.csproj" />
   </ItemGroup>
 
 </Project>
