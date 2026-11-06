@@ -7,7 +7,7 @@ internal interface IDiskWriteProtection
 {
     bool TrySetReadOnlyState(int diskNumber, bool readOnly, out string? error);
 
-    bool IsReadOnly(int diskNumber);
+    bool TryGetAttributes(int diskNumber, out WindowsDiskAttributes attributes, out string? error);
 }
 
 /// <summary>
@@ -30,10 +30,10 @@ internal interface IDiskWriteProtection
 /// </summary>
 internal sealed class WindowsSourceTakeover : ISourceTakeoverService
 {
-    private readonly WindowsVolumeService _volumes;
+    private readonly IWindowsTakeoverVolumes _volumes;
     private readonly IDiskWriteProtection _protection;
 
-    public WindowsSourceTakeover(WindowsVolumeService volumes, IDiskWriteProtection protection)
+    public WindowsSourceTakeover(IWindowsTakeoverVolumes volumes, IDiskWriteProtection protection)
     {
         _volumes = volumes;
         _protection = protection;
@@ -52,7 +52,7 @@ internal sealed class WindowsSourceTakeover : ISourceTakeoverService
         var warnings = new List<string>();
 
         int diskNumber = disk.Identity.Number;
-        var allVolumes = WindowsVolumeService.Enumerate();
+        var allVolumes = _volumes.EnumerateForTakeover();
 
         // ---------------------------------------------------------- refused configurations
 
@@ -77,71 +77,84 @@ internal sealed class WindowsSourceTakeover : ISourceTakeoverService
             steps.Add("Na disku nejsou připojené žádné svazky – není co odpojovat.");
         }
 
-        // ---------------------------------------------------------- already read-only
-
-        if (_protection.IsReadOnly(diskNumber))
+        // Query actual attributes. A failed writable CreateFile is NOT proof of read-only.
+        if (!_protection.TryGetAttributes(diskNumber, out var original, out var readError))
         {
-            steps.Add("Disk je už nastaven jako pouze pro čtení – není co měnit.");
-            warnings.Add(
-                "Disk byl read-only ještě před spuštěním nástroje. Nástroj jej takovým ponechá i po skončení.");
-            session = new Session(_volumes, _protection, diskNumber, volumes, changedByUs: false);
+            problems.Add("Nelze zjistit skutečné atributy zdrojového disku: " + readError);
+            return Fail(steps, problems, warnings, canRetry: true);
+        }
+
+        if (original.IsOffline)
+        {
+            problems.Add("Zdrojový disk je OFFLINE; nebudeme měnit jeho stav ani pokračovat.");
+            return Fail(steps, problems, warnings, canRetry: false);
+        }
+
+        if (original.IsReadOnly)
+        {
+            steps.Add("Zdroj byl prokazatelně READ_ONLY už před spuštěním.");
+            warnings.Add("Původní režim READ_ONLY zůstane zachován.");
+            session = new Session(_volumes, _protection, diskNumber, [], changedByUs: false);
             return Success(steps, problems, warnings);
         }
 
-        // ---------------------------------------------------------- flush and detach
-
-        var flushed = new List<VolumeRecord>();
-
-        foreach (var volume in volumes)
+        // Keep successful volume locks until the physical-disk attribute is verified.
+        // Without the lock, Windows could remount a writable volume between operations.
+        var locks = new List<ISourceVolumeLock>();
+        var dismounted = new List<VolumeRecord>();
+        try
         {
-            string name = volume.RootPath ?? volume.GuidPath;
-
-            if (!volume.HasFileSystem)
+            foreach (var volume in volumes)
             {
-                steps.Add($"{name}: svazek bez souborového systému – není co odpojovat.");
-                continue;
-            }
+                string name = volume.RootPath ?? volume.GuidPath;
+                if (!volume.HasFileSystem)
+                {
+                    steps.Add($"{name}: bez připojeného souborového systému.");
+                    continue;
+                }
 
-            var result = _volumes.FlushAndDismount(volume);
+                var result = _volumes.FlushAndLock(volume, out var held);
+                if (!result.Success || held is null)
+                {
+                    held?.Dispose();
+                    problems.Add($"{name}: {result.Message}.");
+                    break;
+                }
 
-            if (result.Success)
-            {
-                flushed.Add(volume);
+                locks.Add(held);
+                dismounted.Add(volume);
                 steps.Add($"{name}: {result.Message}.");
             }
-            else
+
+            if (problems.Count > 0)
+                return Fail(steps, problems, warnings, canRetry: true);
+
+            if (!_protection.TrySetReadOnlyState(diskNumber, true, out string? setError))
             {
-                problems.Add($"{name}: {result.Message}.");
+                problems.Add("Nepodařilo se zapnout ochranu zdroje: " + setError);
+                return Fail(steps, problems, warnings, canRetry: true);
             }
-        }
 
-        if (problems.Count > 0)
+            bool verified = _protection.TryGetAttributes(
+                diskNumber, out var current, out var verifyError);
+            if (!verified || !current.IsReadOnly || current.IsOffline)
+            {
+                if (!_protection.TrySetReadOnlyState(diskNumber, false, out var undoError))
+                    warnings.Add("POZOR: Nezdařilo se vrátit ochranný atribut: " + undoError);
+                problems.Add("Po zápisu nelze bezpečně potvrdit READ_ONLY bez OFFLINE: " +
+                             verifyError);
+                return Fail(steps, problems, warnings, canRetry: false);
+            }
+
+            steps.Add("GET_DISK_ATTRIBUTES potvrdil READ_ONLY, disk zůstal ONLINE.");
+            session = new Session(_volumes, _protection, diskNumber, dismounted, changedByUs: true);
+            return Success(steps, problems, warnings);
+        }
+        finally
         {
-            return Fail(steps, problems, warnings, canRetry: true);
+            for (int i = locks.Count - 1; i >= 0; i--)
+                locks[i].Dispose();
         }
-
-        // ---------------------------------------------------------- write protection
-
-        if (!_protection.TrySetReadOnlyState(diskNumber, true, out string? error))
-        {
-            problems.Add(
-                "Zdrojový disk se nepodařilo přepnout do režimu pouze pro čtení" +
-                (string.IsNullOrWhiteSpace(error) ? "." : $" ({error})."));
-            problems.Add("Migraci odmítáme – pokračovat bez ochrany zdroje by bylo riskantní.");
-            return Fail(steps, problems, warnings, canRetry: true);
-        }
-
-        if (!_protection.IsReadOnly(diskNumber))
-        {
-            _protection.TrySetReadOnlyState(diskNumber, false, out _);
-            problems.Add("Režim pouze pro čtení se nepodařilo ověřit, proto jej ruším a migraci odmítám.");
-            return Fail(steps, problems, warnings, canRetry: true);
-        }
-
-        steps.Add("Zdrojový disk je nastaven jako pouze pro čtení a ověřeno.");
-
-        session = new Session(_volumes, _protection, diskNumber, flushed, changedByUs: true);
-        return Success(steps, problems, warnings);
     }
 
     private static SourceTakeoverReport Fail(
@@ -168,7 +181,7 @@ internal sealed class WindowsSourceTakeover : ISourceTakeoverService
     /// <summary>Holds the state needed to hand the disk back exactly as it was found.</summary>
     private sealed class Session : ISourceTakeoverSession
     {
-        private readonly WindowsVolumeService _volumes;
+        private readonly IWindowsTakeoverVolumes _volumes;
         private readonly IDiskWriteProtection _protection;
         private readonly int _diskNumber;
         private readonly IReadOnlyList<VolumeRecord> _volumesToRemount;
@@ -176,7 +189,7 @@ internal sealed class WindowsSourceTakeover : ISourceTakeoverService
         private bool _released;
 
         public Session(
-            WindowsVolumeService volumes,
+            IWindowsTakeoverVolumes volumes,
             IDiskWriteProtection protection,
             int diskNumber,
             IReadOnlyList<VolumeRecord> volumesToRemount,
@@ -206,13 +219,17 @@ internal sealed class WindowsSourceTakeover : ISourceTakeoverService
             {
                 if (_protection.TrySetReadOnlyState(_diskNumber, false, out string? error))
                 {
-                    if (_protection.IsReadOnly(_diskNumber))
+                    if (!_protection.TryGetAttributes(_diskNumber, out var current, out var readError))
                     {
-                        problems.Add("Read-only příznak zdrojového disku stále platí, i když se jeho zrušení hlásilo jako úspěšné.");
+                        problems.Add("Nelze ověřit navrácení atributů zdrojového disku: " + readError);
+                    }
+                    else if (current.IsReadOnly || current.IsOffline)
+                    {
+                        problems.Add("Zdroj po uvolnění není prokazatelně ONLINE a zapisovatelný.");
                     }
                     else
                     {
-                        steps.Add("Read-only příznak zdrojového disku zrušen – disk je opět zapisovatelný.");
+                        steps.Add("GET_DISK_ATTRIBUTES potvrdil: zdroj je ONLINE a není read-only.");
                     }
                 }
                 else
