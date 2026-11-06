@@ -2,7 +2,7 @@
 
 > ## ⚠️ EXPERIMENTÁLNÍ VERZE 1.0
 >
-> Nástroj je funkční a má za sebou 112 automatických testů, ale **nebyl spuštěn na
+> Nástroj je funkční a má za sebou 113 automatických testů, ale **nebyl spuštěn na
 > skutečném počítači s Windows a fyzickými disky**. Vrstva pro hardware, `DISM`,
 > `bcdboot` a start cílového systému vyžadují ověření na reálném stroji nebo ve VM.
 >
@@ -157,7 +157,7 @@ src/
   Afrowave.DiskMigrator.Platform.Image/  disky nad obrazovými soubory (testy, simulace)
   Afrowave.DiskMigrator.Platform.Windows/ reálné disky, svazky, DISM, bcdboot
   Afrowave.DiskMigrator.Cli/             české terminálové uživatelské rozhraní
-tests/                                   automatické testy (112 testů)
+tests/                                   automatické testy (113 testů)
 tools/Afrowave.SampleDisks/              generátor simulovaných disků pro školení
 tools/windows-vm-test/                   testovací scénář pro Windows (VHDX + VM)
 docs/                                    dokumentace
