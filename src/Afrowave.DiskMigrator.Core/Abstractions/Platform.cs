@@ -16,6 +16,9 @@ public sealed class PhysicalDisk
     /// <summary>True when the disk is a dynamic disk, Storage Spaces member or similar container.</summary>
     public bool IsContainerMember { get; init; }
 
+    /// <summary>Reason why disk status could not be established; blocks both roles without calling it a container.</summary>
+    public string? AvailabilityProblem { get; init; }
+
     public string? ContainerReason { get; init; }
 
     public override string ToString() => Identity.ShortLabel;
