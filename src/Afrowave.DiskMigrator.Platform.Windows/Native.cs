@@ -183,19 +183,17 @@ internal readonly record struct VolumeDiskExtent(int DiskNumber, long StartingOf
 
 internal static class NativeParsers
 {
-    /// <summary>Parses DISK_GEOMETRY_EX into size and sector sizes.</summary>
+    /// <summary>Parses DISK_GEOMETRY_EX. Rejects invalid sizes instead of guessing sector geometry.</summary>
     public static (long SizeBytes, int BytesPerSector, int PhysicalBytesPerSector) ParseGeometry(byte[] buffer, int returned)
     {
-        if (returned < 32) throw new IOException("Zařízení nevrátilo platnou geometrii.");
+        if (returned < 32 || returned > buffer.Length ||
+            !WindowsDiskGeometryProtocol.TryDecode(buffer.AsSpan(0, returned), out long size, out int bytesPerSector))
+        {
+            throw new IOException("Zařízení nevrátilo platnou geometrii nebo velikost logického sektoru.");
+        }
 
-        int bytesPerSector = BitConverter.ToInt32(buffer, 16);
-        long size = BitConverter.ToInt64(buffer, 24);
-
-        // DISK_GEOMETRY_EX does not contain STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR.
-        // The physical sector size is queried separately with IOCTL_STORAGE_QUERY_PROPERTY.
-        if (size <= 0) throw new IOException("Zařízení hlásí nulovou velikost.");
-        if (bytesPerSector <= 0) bytesPerSector = 512;
-
+        // DISK_GEOMETRY_EX provides logical sector size; the physical sector size
+        // is queried separately with IOCTL_STORAGE_QUERY_PROPERTY.
         return (size, bytesPerSector, bytesPerSector);
     }
 
