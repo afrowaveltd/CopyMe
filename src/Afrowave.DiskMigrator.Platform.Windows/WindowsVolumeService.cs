@@ -11,6 +11,9 @@ internal sealed class VolumeRecord
 
     public required IReadOnlyList<VolumeDiskExtent> Extents { get; init; }
 
+    /// <summary>True if Windows could not determine the physical disk ownership.</summary>
+    public bool ExtentsUnavailable { get; init; }
+
     public char? DriveLetter { get; set; }
 
     public string? Label { get; init; }
@@ -73,18 +76,22 @@ internal sealed class WindowsVolumeService : IVolumeService, IWindowsTakeoverVol
         var nameBuffer = new StringBuilder(1024);
 
         using var find = Native.FindFirstVolume(nameBuffer, nameBuffer.Capacity);
-        if (find.IsInvalid) return records;
+        if (find.IsInvalid)
+            throw new IOException("FindFirstVolume selhal: nelze bezpečně zjistit připojené svazky.");
 
         do
         {
             string guidPath = nameBuffer.ToString();
             if (guidPath.Length == 0) continue;
 
-            var extents = ReadExtents(guidPath);
+            var extents = ReadExtents(guidPath, out bool extentsUnavailable);
             if (extents.Count == 0)
             {
-                // Not a real volume (no disk extents); still record it so nothing crashes later.
-                records.Add(new VolumeRecord { GuidPath = guidPath, Extents = extents });
+                // Never silently assume that an unreadable volume belongs to another disk.
+                records.Add(new VolumeRecord
+                {
+                    GuidPath = guidPath, Extents = extents, ExtentsUnavailable = extentsUnavailable
+                });
                 continue;
             }
 
@@ -119,22 +126,37 @@ internal sealed class WindowsVolumeService : IVolumeService, IWindowsTakeoverVol
         return records;
     }
 
-    private static IReadOnlyList<VolumeDiskExtent> ReadExtents(string guidPath)
+    private static IReadOnlyList<VolumeDiskExtent> ReadExtents(
+        string guidPath, out bool unavailable)
     {
+        unavailable = false;
         using var handle = Native.CreateFile(
             ToDevicePath(guidPath), Native.GenericRead, Native.FileShareRead | Native.FileShareWrite,
             IntPtr.Zero, Native.OpenExisting, 0, IntPtr.Zero);
 
-        if (handle.IsInvalid) return [];
+        if (handle.IsInvalid)
+        {
+            unavailable = true;
+            return [];
+        }
 
         var buffer = new byte[512];
         if (!Native.DeviceIoControl(handle, Native.IoctlVolumeGetVolumeDiskExtents, null, 0,
                 buffer, buffer.Length, out int returned, IntPtr.Zero))
         {
+            unavailable = true;
             return [];
         }
 
-        return NativeParsers.ParseVolumeExtents(buffer, returned);
+        try
+        {
+            return NativeParsers.ParseVolumeExtents(buffer, returned);
+        }
+        catch (IOException)
+        {
+            unavailable = true;
+            return [];
+        }
     }
 
     private static char? ReadDriveLetter(string guidPath)
