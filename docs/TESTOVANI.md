@@ -34,8 +34,8 @@ Spuštění:
 Aktuální výsledek:
 
 ```
-Afrowave DiskMigrator – test suite (112 testů)
-Výsledek: 112 prošlo, 0 selhalo (GitHub Actions, Linux; Windows EXE byl sestaven)
+Afrowave DiskMigrator – test suite (113 testů)
+Výsledek: 113 prošlo, 0 selhalo (GitHub Actions, Linux; Windows EXE byl sestaven)
 ```
 
 Testy nepoužívají žádnou testovací knihovnu – součástí projektu je malý runner
@@ -197,7 +197,7 @@ Nad rámec testů proběhlo ověření přes skutečné CLI v simulačním reži
 | Interaktivní volba chráněného disku jako zdroje | odmítnuto, znovu se ptá, vypíše důvod |
 | Potvrzení jiným slovem než `ANO` | migrace se nespustí, návratový kód 0 |
 
-## 2.11 Windows API a bezpečnost převzetí (17 nových testů)
+## 2.11 Windows API a bezpečnost převzetí (18 nových testů)
 
 Testy `WindowsSafetyProtocolTests` běží i na Linuxu: ověřují skutečný formát
 `SET_DISK_ATTRIBUTES` (40 bajtů, Version=16), `GET_DISK_ATTRIBUTES`,
