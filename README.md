@@ -2,7 +2,7 @@
 
 > ## ⚠️ EXPERIMENTÁLNÍ VERZE 1.0
 >
-> Nástroj je funkční a má za sebou 113 automatických testů, ale **nebyl spuštěn na
+> Nástroj je funkční a má za sebou 119 automatických testů, ale **nebyl spuštěn na
 > skutečném počítači s Windows a fyzickými disky**. Vrstva pro hardware, `DISM`,
 > `bcdboot` a start cílového systému vyžadují ověření na reálném stroji nebo ve VM.
 >
@@ -157,7 +157,7 @@ src/
   Afrowave.DiskMigrator.Platform.Image/  disky nad obrazovými soubory (testy, simulace)
   Afrowave.DiskMigrator.Platform.Windows/ reálné disky, svazky, DISM, bcdboot
   Afrowave.DiskMigrator.Cli/             české terminálové uživatelské rozhraní
-tests/                                   automatické testy (113 testů)
+tests/                                   automatické testy (119 testů)
 tools/Afrowave.SampleDisks/              generátor simulovaných disků pro školení
 tools/windows-vm-test/                   testovací scénář pro Windows (VHDX + VM)
 docs/                                    dokumentace
@@ -193,3 +193,10 @@ a kontrolu, ale nikdy nemůže sáhnout na skutečný disk.
 Zdrojové kódy: volně použitelné ve firmě Afrowave i mimo ni. Nástroj nepoužívá žádnou
 komerční ani copyleft knihovnu – runtime tvoří .NET (MIT) a systémové nástroje Microsoft,
 které jsou součástí Windows.
+
+### Disky USB a ochrana zdroje
+
+Připojený zákaznický disk s původní instalací Windows není automaticky
+chráněný jen proto, že obsahuje soubory pagefile.sys či hiberfil.sys.
+USB rozhraní samo o sobě také není výjimkou z ochrany. Podrobnosti:
+[Windows disk inventory](docs/WINDOWS_DISK_INVENTORY.md).
