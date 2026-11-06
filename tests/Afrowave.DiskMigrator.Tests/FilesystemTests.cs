@@ -94,6 +94,35 @@ public static class FilesystemTests
         Assert.False(ntfs.Allocations.IsClusterInUse(2047), "poslední cluster musí být volný");
     }
 
+    [Test("NTFS boot sector layout matches the Windows disk format")]
+    public static void NtfsBootSectorCanonicalOffsets()
+    {
+        var image = SyntheticNtfs.Build(totalClusters: 1024);
+
+        Assert.Equal(8192UL, BitConverter.ToUInt64(image, 0x28), "0x28 = volume sectors");
+        Assert.Equal((ulong)SyntheticNtfs.MftLcn, BitConverter.ToUInt64(image, 0x30), "0x30 = MFT LCN");
+        Assert.True(BitConverter.ToUInt64(image, 0x38) != 0, "0x38 = MFT mirror LCN");
+        Assert.Equal(unchecked((byte)(sbyte)-10), image[0x40], "0x40 = record size code");
+
+        using var reader = new MemoryBlockDeviceFrom(image);
+        using var volume = NtfsVolume.Open(reader, 0, image.Length);
+        Assert.Equal(1024, SyntheticNtfs.RecordSize, "synthetic record size");
+        Assert.Equal(1024L * SyntheticNtfs.RecordSize / 1024, 1024L, "MFT record size sanity");
+        Assert.False(volume.Info.IsDirty, "canonical header remains readable");
+    }
+
+    [Test("A malformed MFT record size cannot silently fall back to 1024 bytes")]
+    public static void NtfsInvalidRecordSizeRejected()
+    {
+        var image = SyntheticNtfs.Build(totalClusters: 1024);
+        image[0x40] = 0; // invalid: no FILE-record size specified
+        using var reader = new MemoryBlockDeviceFrom(image);
+
+        Assert.Throws<NtfsAnalysisException>(
+            () => NtfsVolume.Open(reader, 0, image.Length).Dispose(),
+            "unknown record size must not be guessed");
+    }
+
     [Test("The NTFS dirty flag must be detected")]
     public static void NtfsDirtyFlag()
     {
@@ -134,8 +163,10 @@ public static class FilesystemTests
         BitConverter.TryWriteBytes(boot[0x0B..], (ushort)512);
         boot[0x0D] = (byte)sectorsPerCluster;
         boot[0x15] = 0xF8;
-        BitConverter.TryWriteBytes(boot[0x28..], 8UL);
-        boot[0x38] = unchecked((byte)(sbyte)-10);
+        BitConverter.TryWriteBytes(boot[0x28..], (ulong)(buffer.Length / 512));
+        BitConverter.TryWriteBytes(boot[0x30..], 8UL);
+        BitConverter.TryWriteBytes(boot[0x38..], 16UL);
+        boot[0x40] = unchecked((byte)(sbyte)-10);
         boot[0x1FE] = 0x55;
         boot[0x1FF] = 0xAA;
     }
