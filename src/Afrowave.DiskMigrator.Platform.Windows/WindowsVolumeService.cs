@@ -52,6 +52,16 @@ internal sealed class WindowsVolumeService : IVolumeService, IWindowsTakeoverVol
 {
     public IReadOnlyList<VolumeRecord> EnumerateForTakeover() => Enumerate();
 
+    /// <summary>
+    /// Win32 volume enumeration/mount-point APIs need the trailing backslash,
+    /// but CreateFile requires the volume DEVICE path without it.
+    /// </summary>
+    internal static string ToDevicePath(string volumeGuidPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(volumeGuidPath);
+        return volumeGuidPath.EndsWith('\\') ? volumeGuidPath[..^1] : volumeGuidPath;
+    }
+
     private static readonly char[] CandidateLetters =
         ['Z', 'Y', 'X', 'W', 'V', 'U', 'T', 'S', 'R', 'Q', 'P', 'O', 'N', 'M', 'L', 'K'];
 
@@ -112,7 +122,7 @@ internal sealed class WindowsVolumeService : IVolumeService, IWindowsTakeoverVol
     private static IReadOnlyList<VolumeDiskExtent> ReadExtents(string guidPath)
     {
         using var handle = Native.CreateFile(
-            guidPath, Native.GenericRead, Native.FileShareRead | Native.FileShareWrite,
+            ToDevicePath(guidPath), Native.GenericRead, Native.FileShareRead | Native.FileShareWrite,
             IntPtr.Zero, Native.OpenExisting, 0, IntPtr.Zero);
 
         if (handle.IsInvalid) return [];
@@ -290,7 +300,7 @@ internal sealed class WindowsVolumeService : IVolumeService, IWindowsTakeoverVol
         volumeLock = null;
         // Microsoft documents FILE_SHARE_READ | FILE_SHARE_WRITE for volume FSCTL handles.
         var handle = Native.CreateFile(
-            volume.GuidPath,
+            ToDevicePath(volume.GuidPath),
             Native.GenericRead | Native.GenericWrite,
             Native.FileShareRead | Native.FileShareWrite,
             IntPtr.Zero, Native.OpenExisting, 0, IntPtr.Zero);
@@ -390,7 +400,7 @@ internal sealed class WindowsVolumeService : IVolumeService, IWindowsTakeoverVol
     private static SafeFileHandle? OpenVolume(string guidPath)
     {
         var handle = Native.CreateFile(
-            guidPath,
+            ToDevicePath(guidPath),
             Native.GenericRead | Native.GenericWrite,
             0,
             IntPtr.Zero,
