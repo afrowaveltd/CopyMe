@@ -100,30 +100,28 @@ byl virtuální disk stejné velikosti, skript se zastaví místo toho, aby hád
 Toto je jediný způsob, jak poctivě ověřit, že výsledek je skutečně bootovatelný.
 Skript to nedělá, protože k tomu je potřeba virtuální počítač.
 
-### Příprava
+### Příprava — důležité: neklonovat běžící systém
 
-1. Ve virtualizačním prostředí (Hyper-V, VMware, VirtualBox) vytvořte VM s Windows
-   10/11. Můžete použít zkušební obraz, licence není potřeba – ověřuje se startování,
-   nikoli aktivace.
-2. VM vypněte a připojte k ní **druhý, menší** virtuální disk (např. zdrojový 60 GB,
-   cílový 40 GB). Cílový musí být zcela nový, bez oddílů.
-3. Spusťte VM a přihlaste se jako správce.
+1. Vytvořte **VM zákazníka** s Windows 10/11 na disku A (např. 60 GB).
+   Systém na disku A spusťte, připravte testovací data a pak VM **úplně vypněte**.
+2. Vytvořte **samostatnou servisní VM** s vlastním systémovým diskem C
+   (Windows 10/11, administrační oprávnění). Připojte k ní vypnutý disk A
+   a nový prázdný disk B (např. 40 GB). Disk A v servisní VM není běžící systém.
+3. V servisní VM spusťte CopyMe. Disk C musí být `CHRÁNĚN`; A je možný
+   **zdroj**; B musí být prázdný **cíl**. Pokud tomu tak není, nepokračujte.
 
 ### Vlastní test
 
-1. Zkopírujte `AfrowaveDiskMigrator.exe` do VM (např. přes sdílenou složku).
-2. Spusťte jej **jako správce**.
-3. Ověřte na seznamu disků:
-   * systémový disk VM je označen `CHRÁNĚN`,
-   * cílový disk je označen `zdroj i cíl`,
-   * zdrojový disk s instalací Windows je označen `zdroj (cíl ne: …)` –
-     **to je klíčová kontrola**: offline instalace Windows musí jít vybrat jako zdroj.
-4. Nejdřív `--dry-run` a projděte plán.
-5. Potom skutečnou migraci a potvrďte `ANO`.
-6. Po dokončení VM vypněte.
-7. **Odpojte zdrojový disk** (cíl převzal jeho identifikátory, oba najednou by si
-   Windows pletly).
-8. Nastartujte VM z cílového disku.
+1. Spusťte `AfrowaveDiskMigrator.exe` **jako správce** v servisní VM.
+2. Ověřte názvy, sériová čísla, kapacity, čísla disků, ochranu C a stavy A/B.
+3. Proveďte `--dry-run` a ověřte, že A i B zůstaly nezměněné.
+4. Spusťte migraci A → B a potvrďte `ANO`.
+5. Po dokončení ověřte, že A je opět online, zapisovatelný a původní
+   písmena jeho svazků zůstala zachována.
+6. Vypněte servisní VM. Odpojte od ní A i B.
+7. K původní zákaznické VM připojte **pouze B**, disk A nechte bezpečně odpojený
+   (identifikátory disků se mohou shodovat). Nastartujte z B.
+8. Ověřte Windows, data, aplikace, BCD, WinRE a systémové události.
 
 ### Co sledovat
 
