@@ -7,6 +7,19 @@ namespace Afrowave.DiskMigrator.Platform.Windows;
 /// <summary>Win32 declarations needed for raw disk access. Deliberately minimal.</summary>
 internal static class Native
 {
+    [UnmanagedFunctionPointer(CallingConvention.Winapi, CharSet = CharSet.Unicode)]
+    public delegate bool PageFileEnumerationCallback(
+        IntPtr context, IntPtr pageFileInformation,
+        [MarshalAs(UnmanagedType.LPWStr)] string fileName);
+
+    [DllImport("psapi.dll", EntryPoint = "EnumPageFilesW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool EnumPageFiles(PageFileEnumerationCallback callback, IntPtr context);
+
+    [DllImport("kernel32.dll", EntryPoint = "QueryDosDeviceW", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern uint QueryDosDevice(
+        string deviceName, StringBuilder targetPath, int maxTargetPathLength);
+
     public const uint GenericRead = 0x80000000;
     public const uint GenericWrite = 0x40000000;
     public const uint FileShareRead = 0x00000001;
