@@ -111,6 +111,12 @@ public static class DiskSafetyPolicy
 
         // ------------------------------------------------------------ source rules
 
+        if (!string.IsNullOrWhiteSpace(disk.AvailabilityProblem))
+        {
+            sourceBlockers.Add(disk.AvailabilityProblem);
+            targetBlockers.Add(disk.AvailabilityProblem);
+        }
+
         if (disk.IsOffline)
         {
             sourceBlockers.Add("disk je offline");
