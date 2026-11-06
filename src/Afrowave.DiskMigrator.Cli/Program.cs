@@ -38,6 +38,7 @@ internal static class Program
         {
             Console.Error.WriteLine();
             Console.Error.WriteLine("Neočekávaná chyba: " + ex.GetType().Name + ": " + ex.Message);
+            Console.Error.WriteLine("Podrobnosti (zásobník volání): " + ex);
             Console.Error.WriteLine("Nástroj se ukončil. Pokud byl cílový disk rozpracovaný, nepoužívejte jej.");
             return ExitCodes.UnexpectedError;
         }
@@ -574,15 +575,19 @@ internal static class Program
         {
             if (evaluation.IsProtected || !evaluation.CanBeSource) continue;
 
+            int diskNumber = evaluation.Disk.Identity.Number;
             try
             {
                 using var reader = platform.OpenReader(evaluation.Disk);
-                states[evaluation.Disk.Identity.Number] = TargetDiskInspector.Inspect(reader);
+                states[diskNumber] = TargetDiskInspector.Inspect(reader);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             {
-                states[evaluation.Disk.Identity.Number] = TargetInspection.Uncertain(
-                    ["Disk nelze přečíst: " + ex.Message]);
+                // An unexpected parser failure must never turn an unknown disk into a target.
+                // Isolate the disk, retain the stack trace and fail closed for both roles.
+                Console.Error.WriteLine($"Disk {diskNumber}: chyba kontroly oddílů: {ex}");
+                states[diskNumber] = TargetInspection.Uncertain(
+                    [$"Disk {diskNumber} nelze spolehlivě prověřit: {ex.GetType().Name}: {ex.Message}"]);
             }
         }
 
