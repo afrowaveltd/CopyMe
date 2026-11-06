@@ -183,7 +183,7 @@ internal static class NativeParsers
         if (size <= 0) throw new IOException("Zařízení hlásí nulovou velikost.");
         if (bytesPerSector <= 0) bytesPerSector = 512;
 
-        return (size, bytesPerSector, physical);
+        return (size, bytesPerSector, bytesPerSector);
     }
 
     /// <summary>Parses STORAGE_DEVICE_DESCRIPTOR.</summary>
