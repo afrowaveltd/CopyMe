@@ -146,9 +146,11 @@ internal static class PlanPresenter
 
             if (role == DiskRole.Source)
             {
-                ui.WriteLine(
-                    $"      └ obsahuje {state!.DefinedPartitionCount} oddílů – zdroj, nebo cíl po výslovném vymazání",
-                    ConsoleColor.DarkGray);
+                string detail = evaluation.CanBeTarget
+                    ? $"obsahuje {state!.DefinedPartitionCount} oddílů – zdroj, nebo cíl po výslovném vymazání"
+                    : $"obsahuje {state!.DefinedPartitionCount} oddílů – cíl nelze: " +
+                      (evaluation.TargetBlockers.FirstOrDefault() ?? "nepoužitelný");
+                ui.WriteLine("      └ " + detail, ConsoleColor.DarkGray);
             }
             else if (role == DiskRole.Target)
             {
