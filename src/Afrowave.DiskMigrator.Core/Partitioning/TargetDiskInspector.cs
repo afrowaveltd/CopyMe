@@ -76,6 +76,18 @@ public static class TargetDiskInspector
     public static TargetInspection Inspect(IBlockReader device)
     {
         int sectorSize = device.SectorSize;
+        if (sectorSize is < 512 or > 65536 || (sectorSize & (sectorSize - 1)) != 0)
+        {
+            return TargetInspection.Uncertain(
+                [$"Disk hlásí nepodporovanou velikost logického sektoru ({sectorSize} B)."]);
+        }
+
+        if (device.Length <= 0 || device.Length % sectorSize != 0)
+        {
+            return TargetInspection.Uncertain(
+                ["Velikost disku není platným násobkem velikosti sektoru."]);
+        }
+
         long diskSectors = device.Length / sectorSize;
 
         if (diskSectors < 2)
