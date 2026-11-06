@@ -50,7 +50,8 @@ Legenda: ✅ ověřeno automatickými testy · ⚠️ kód hotový, čeká na ov
 1. Zkopírujte `AfrowaveDiskMigrator.exe` na USB flash disk.
 2. Na servisním počítači klikněte na EXE pravým tlačítkem → **Spustit jako správce**.
 3. Zadejte číslo zdrojového disku, potom cílového.
-   **Cílový disk musí být bez oddílů** – nástroj oddíly nikdy nemaže.
+   Cílový disk může obsahovat oddíly; jejich vymazání je možné jen po
+   samostatném, opakovaném potvrzení a úspěšné kontrole migračního plánu.
 4. Zkontrolujte navržený plán a napište `ANO`.
 5. Po dokončení **odpojte zdrojový disk** a ověřte start systému z cílového disku.
 

@@ -58,8 +58,10 @@ to, co sám změnil.
 
 ### Důležité předpoklady
 
-* **Cílový disk musí být bez oddílů** – nový disk z výroby nebo disk, který už někdo
-  vyprázdnil. Nástroj oddíly nikdy nemaže, aby si disk uvolnil.
+* **Cílový disk může mít existující oddíly**, ale musí být rozpoznaný, nechráněný,
+  online a zapisovatelný. V takovém případě aplikace nejprve spočítá proveditelný
+  migrační plán a potom vyžádá dvě samostatná potvrzení pro vymazání všech oddílů.
+  Bez těchto potvrzení oddíly zůstanou zachované.
 * **Zdrojový disk musí být vypnutý řádně, ne hibernovaný.** Pokud byl počítač
   uspán nebo vypnut pomocí rychlého startu, doporučujeme jej nejprve spustit
   a provést úplné vypnutí. Nástroj na hibernaci upozorní.
@@ -72,7 +74,8 @@ to, co sám změnil.
 
 * Nezapíše ani bajt na zdrojový disk.
 * Nevybere za vás žádný disk.
-* Nesmaže oddíly na cílovém disku, aby si jej uvolnil.
+* Nesmaže oddíly na cílovém disku **bez samostatného dvojího potvrzení**.
+  Samotný parametr `--yes` vymazání neautorizuje.
 * Nenabídne jako zdroj ani cíl disk servisního počítače, disk, ze kterého běží,
   ani disk s hibernačním či stránkovacím souborem běžícího systému.
 * Nezmění zavádění ani konfiguraci servisního počítače.
@@ -152,8 +155,9 @@ Nabídnou se jen disky bez oddílů.
 
 Platí tři podmínky:
 
-1. Disk **nesmí obsahovat žádné oddíly**. Pokud obsahuje, nástroj migraci odmítne
-   a vypíše, co na něm našel. Oddíly nikdy nemaže.
+1. Disk může být prázdný nebo obsahovat platné, jednoznačně přečtené oddíly.
+   Příprava obsazeného cíle všechny tyto oddíly smaže pouze po výslovném
+   potvrzení technika a opětovném ověření totožnosti disku.
 2. Disk nesmí být totožný se zdrojovým.
 3. Disk nesmí patřit servisnímu počítači.
 
@@ -161,8 +165,9 @@ Odmítnuty jsou i disky, jejichž tabulka oddílů je poškozená nebo nejednozn
 například hybridní MBR, zbytky GPT bez ochranného záznamu nebo nečitelná tabulka.
 V nejistém stavu se nikdy nezapisuje.
 
-> **Cílový disk bude inicializován.** Odpovědnost za jeho výběr nese technik;
-> kontrola neprázdnosti je jen dodatečná pojistka.
+> **Cílový disk bude inicializován.** Pokud obsahuje oddíly, jejich odstranění
+> je samostatná destruktivní operace a technik ji musí potvrdit, i když předal
+> `--yes`. `--dry-run` pouze simuluje plán a na cílový disk nezapisuje.
 
 ---
 

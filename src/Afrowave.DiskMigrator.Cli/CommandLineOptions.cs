@@ -158,8 +158,10 @@ internal sealed class CommandLineOptions
                   --simulate <adresar> Simulační režim nad soubory disk*.img (bez fyzických disků).
 
             Cílový disk:
-              Cílovým diskem může být jen disk BEZ definovaných oddílů. Nástroj oddíly
-              nikdy nemaže, aby si disk uvolnil - vybrat je třeba jiný disk.
+              Vybrat lze prázdný nebo obsazený, ale bezpečně rozpoznaný disk.
+              U obsazeného cíle se nejprve ověří proveditelnost plánu.
+              Vymazání VŠECH oddílů vyžaduje samostatné dvojí potvrzení.
+              Ani --yes potvrzení vymazání nepřeskočí; --dry-run nemaže nic.
 
             Návratové kódy:
               0  úspěch (nebo uživatel potvrzení odmítl - na disky se nepsalo)
@@ -173,7 +175,7 @@ internal sealed class CommandLineOptions
 
             Bezpečnost:
               * Disky vybírá vždy uživatel - nástroj žádný nevybere sám.
-              * Cílový disk musí být bez oddílů; nástroj je nikdy nemaže.
+              * Obsazený cíl lze vymazat jen po výslovném dvojím potvrzení.
               * Zdrojový disk nástroj sám převezme: svazky vyprázdní a odpojí,
                 disk přepne do režimu read-only a po skončení vše vrátí.
                 Technik nemusí nic odpojovat, ani když disk už má písmena jednotek.
@@ -181,6 +183,8 @@ internal sealed class CommandLineOptions
               * Offline instalace Windows na zdrojovém disku zůstává volitelná.
               * Disky servisního počítače a disk, ze kterého nástroj běží, jsou chráněny.
               * Před zápisem se znovu ověří identita obou disků a prázdnost cíle.
+              * Obsazený cíl lze vymazat až po úspěšném plánování a dodatečném ověření identity.
+              * --yes nikdy nestačí k odstranění existujících oddílů.
               * Cílový disk se přepisuje až po výslovném potvrzení.
               * Když si nástroj není jistý, operaci odmítne a vysvětlí proč.
             """);

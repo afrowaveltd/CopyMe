@@ -282,10 +282,12 @@ internal static class Program
         // ---------------------------------------------------------- target
 
         var targetEvaluation = SelectDisk(ui, evaluations, targetStates, options.TargetDiskNumber,
-            "Zadejte číslo CÍLOVÉHO disku (musí být bez oddílů)",
-            e => DiskRoleRules.CanServeAsTarget(e, targetStates.GetValueOrDefault(e.Disk.Identity.Number))
+            "Zadejte číslo CÍLOVÉHO disku (případné oddíly lze výslovně smazat)",
+            e => e.CanBeTarget
+                 && targetStates.GetValueOrDefault(e.Disk.Identity.Number) is
+                    { State: TargetDiskState.Empty or TargetDiskState.Occupied }
                  && !DiskSafetyPolicy.AreSameDisk(e.Disk.Identity, sourceIdentity),
-            "Jako cíl lze vybrat jen disk bez definovaných oddílů.");
+            "Jako cíl lze vybrat pouze bezpečně rozpoznaný, nechráněný a zapisovatelný disk.");
 
         if (targetEvaluation is null) return ExitCodes.PlanRefused;
 
@@ -302,6 +304,29 @@ internal static class Program
         int targetNumber = targetEvaluation.Disk.Identity.Number;
 
         var targetInspection = targetStates.GetValueOrDefault(targetNumber);
+        if (targetInspection is null || targetInspection.State == TargetDiskState.Uncertain)
+        {
+            ui.Error("Nelze spolehlivě určit stav oddílů zvoleného cíle.");
+            return ExitCodes.PlanRefused;
+        }
+
+        bool needsPreparation = targetInspection.State == TargetDiskState.Occupied;
+        if (needsPreparation)
+        {
+            ui.Section("Cíl obsahuje existující oddíly");
+            ui.Warning($"{targetEvaluation.Disk.Identity.ShortLabel} obsahuje {targetInspection.DefinedPartitionCount} oddílů.");
+            foreach (string reason in targetInspection.Reasons.Take(10))
+                ui.Detail(reason);
+            ui.Warning("Příprava odstraní VŠECHNY oddíly vybraného cíle. Jde o nevratnou operaci.");
+            ui.Info("Nejdřív spočítáme plán; mazání se nabídne teprve když bude proveditelný.");
+        }
+
+        // A simulated empty state is used ONLY by the non-writing planner. The real
+        // occupied state is preserved for confirmation and must be cleared/verified later.
+        var planningInspection = needsPreparation
+            ? TargetInspection.Empty("po výslovném smazání oddílů",
+                ["Plán předpokládá, že obsluha samostatně potvrdí vymazání cílového disku."])
+            : targetInspection;
 
         // An explicitly supplied temporary location is honoured from the start; otherwise the
         // plan is built first and storage is only requested if the migration really needs it.
@@ -333,7 +358,7 @@ internal static class Program
                 TemporaryFilesystem = storage?.Filesystem ?? FilesystemKind.Unknown,
                 ZeroFreeClusters = options.ZeroFreeClusters,
                 IgnoreTemporarySpaceCheck = options.IgnoreTemporarySpaceCheck,
-                TargetInspection = targetInspection,
+                TargetInspection = planningInspection,
                 BootConfigurationAvailable = platform.Boot.IsAvailable,
                 BootConfigurationUnavailableReason = platform.Boot.UnavailableReason,
             });
@@ -366,6 +391,8 @@ internal static class Program
         if (options.DryRun)
         {
             ui.Line();
+            if (needsPreparation)
+                ui.Warning("KONTROLA: plán předpokládá vymazání cíle, ale žádný oddíl nebude změněn.");
             var dryReporter = new MigratorReporter(ui);
             var dryExecutor = new MigrationExecutor(platform, dryReporter, log);
             var dryResult = dryExecutor.Execute(plan, sourceEvaluation.Disk, targetEvaluation.Disk,
@@ -386,7 +413,9 @@ internal static class Program
                       $"(SN {Serial(targetEvaluation.Disk.Identity)})");
             ui.Line();
             ui.Warning("Spuštěním zápisu převezme cílový disk obsah zdrojového disku.");
-            ui.Warning("Zdrojový disk zůstane nedotčen. Cílový disk je bez oddílů a bude inicializován.");
+            ui.Warning(needsPreparation
+                ? "Zdroj zůstane nedotčen. Cíl stále obsahuje oddíly a bude kompletně vymazán."
+                : "Zdrojový disk zůstane nedotčen. Cílový disk je bez oddílů a bude inicializován.");
 
             if (!ui.ConfirmByTyping("ANO", "Potvrzení spuštění migrace:"))
             {
@@ -398,6 +427,45 @@ internal static class Program
         else
         {
             ui.Warning("Potvrzení bylo přeskočeno parametrem --yes.");
+        }
+
+        // ---------------------------------------------------------- explicit target preparation
+        // --yes NEVER grants permission to erase an occupied target.
+        if (needsPreparation)
+        {
+            ui.Section("Samostatné potvrzení vymazání cílového disku");
+            ui.Warning("POZOR: budou odstraněny VŠECHNY oddíly na tomto zařízení:");
+            ui.Detail($"{targetEvaluation.Disk.Identity.ShortLabel}");
+            ui.Detail($"SN: {Serial(targetEvaluation.Disk.Identity)}");
+            ui.Detail($"Velikost: {MigrationPlanner.Format(targetEvaluation.Disk.Identity.SizeBytes)}");
+            ui.Warning("Data z disku již nemusí být možné obnovit.");
+            if (!ui.AskYesNo("Opravdu připravit a vymazat právě tento cílový disk?") ||
+                !ui.ConfirmByTyping($"SMAZAT {targetNumber}",
+                    $"Poslední potvrzení pro disk {targetNumber}:"))
+            {
+                log.Write("REFUSE", $"Příprava disku {targetNumber} nebyla potvrzena.");
+                ui.Info("Příprava byla odmítnuta. Na cílový disk nebylo nic zapsáno.");
+                return ExitCodes.PlanRefused;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            log.Write("CONFIRM", $"Obsluha potvrdila vymazání oddílů cíle {targetNumber}.");
+            ui.Warning("Ověřuji identitu a odpojuji svazky cíle před vymazáním…");
+            var prepared = TargetPreparationService.Prepare(
+                platform, sourceEvaluation.Disk, targetEvaluation.Disk,
+                sourceFingerprint, targetFingerprint, cancellationToken);
+            if (!prepared.Success || prepared.NewFingerprint is null)
+            {
+                log.Write("ABORT", $"Příprava cíle {targetNumber}: {prepared.Message}");
+                ui.Error(prepared.Message);
+                if (prepared.TargetModified)
+                    ui.Warning("Cíl už mohl být změněn. Nepoužívejte jej bez nové kontroly.");
+                return prepared.TargetModified ? ExitCodes.MigrationFailed : ExitCodes.PlanRefused;
+            }
+
+            targetFingerprint = prepared.NewFingerprint;
+            log.Write("STEP", $"Oddíly cíle {targetNumber} smazány, prázdný stav ověřen.");
+            ui.Success(prepared.Message);
         }
 
         // ---------------------------------------------------------- execute
@@ -469,8 +537,8 @@ internal static class Program
             bool forTarget = prompt.Contains("CÍLOVÉHO", StringComparison.Ordinal);
 
             ui.Error(forTarget
-                ? "Žádný disk není bez oddílů, takže není kam migrovat."
-                : "Žádný disk neobsahuje oddíly, takže není co migrovat.");
+                ? "Žádný disk není momentálně použitelný jako cíl."
+                : "Žádný disk neobsahuje čitelné oddíly, takže není co migrovat.");
 
             foreach (var evaluation in evaluations.Where(e => !e.IsProtected))
             {

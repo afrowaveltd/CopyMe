@@ -153,6 +153,10 @@ Tyto situace automatický test nepokrývá a jsou popsány jako neověřené:
 | Zamčený BitLocker svazek na zdroji | Přesune se sektorově; zmenšení odmítnuto |
 | Disk, ze kterého nástroj běží, jako cíl | Nesmí být vůbec nabídnut |
 | Zdroj a cíl označený jako stejný disk | Odmítnuto ještě před zápisem |
-| Cílový disk s existujícími oddíly | Odmítnuto, oddíly zůstanou nedotčené |
+| Cílový disk s MSR či datovým oddílem | Po proveditelném plánu nabízí vymazání pouze po dvojím potvrzení; před potvrzením nedojde k zápisu |
+| Obsazený cíl + `--dry-run` | Zobrazí hypotetický plán, neotevře disk pro zápis ani neodstraní oddíly |
+| Obsazený cíl + `--yes` | Přesto vyžádá nezávislé dvojí potvrzení vymazání |
+| Cíl nebo zdroj změněný po výběru | Fingerprint nesouhlasí; vymazání se neprovede |
+| Cíl s chráněným systémovým svazkem | Nikdy nenabídne možnost vymazání |
 | Cílový disk s poškozenou GPT | Odmítnuto jako nejednoznačný stav |
 | Zdrojový disk po skončení | Nesmí být read-only ani jinak změněný |

@@ -73,11 +73,13 @@ public static class SyntheticNtfs
         boot[0x15] = 0xF8;
         BitConverter.TryWriteBytes(boot.AsSpan(0x18, 2), (ushort)63);
         BitConverter.TryWriteBytes(boot.AsSpan(0x1A, 2), (ushort)255);
-        BitConverter.TryWriteBytes(boot.AsSpan(0x28, 8), (ulong)MftLcn);
-        BitConverter.TryWriteBytes(boot.AsSpan(0x30, 8), (ulong)(MftLcn + MftClusters));
-        boot[0x38] = unchecked((byte)(sbyte)-10); // 1024 byte records
-        boot[0x39] = 0x01;
-        BitConverter.TryWriteBytes(boot.AsSpan(0x40, 8), 0x1234_5678_9ABC_DEF0UL);
+        // Standard NTFS BPB offsets (same as real Windows volumes).
+        BitConverter.TryWriteBytes(boot.AsSpan(0x28, 8), (ulong)(totalClusters * SectorsPerCluster));
+        BitConverter.TryWriteBytes(boot.AsSpan(0x30, 8), (ulong)MftLcn);
+        BitConverter.TryWriteBytes(boot.AsSpan(0x38, 8), (ulong)(MftLcn + MftClusters + bitmapClusters));
+        boot[0x40] = unchecked((byte)(sbyte)-10); // 1024 byte FILE records
+        boot[0x44] = 1; // index record size in clusters
+        BitConverter.TryWriteBytes(boot.AsSpan(0x48, 8), 0x1234_5678_9ABC_DEF0UL);
         boot[510] = 0x55;
         boot[511] = 0xAA;
         device.WriteAt(partitionOffset, boot);
@@ -195,7 +197,7 @@ public static class SyntheticNtfs
 
     public const uint AttrStandardInformation = 0x10;
     public const uint AttrVolumeName = 0x60;
-    public const uint AttrVolumeInformation = 0xA0;
+    public const uint AttrVolumeInformation = 0x70;
     public const uint AttrData = 0x80;
 
     private static byte[] VolumeInformation(bool dirty)

@@ -29,7 +29,7 @@ internal readonly record struct DataRun(long StartVcn, long ClusterCount, long S
 public sealed class NtfsVolume : IDisposable
 {
     private const uint AttrVolumeName = 0x60;
-    private const uint AttrVolumeInformation = 0xA0;
+    private const uint AttrVolumeInformation = 0x70;
     private const uint AttrData = 0x80;
     private const uint AttrEnd = 0xFFFFFFFF;
     private const uint AttrBitmap = 0xB0;
@@ -103,12 +103,21 @@ public sealed class NtfsVolume : IDisposable
             throw new NtfsAnalysisException($"Neočekávaná velikost clusteru NTFS ({clusterSize} B).");
         }
 
-        sbyte recordClusters = unchecked((sbyte)boot[0x38]);
-        int mftRecordSize = recordClusters > 0 ? (int)(recordClusters * clusterSize) : 1 << -recordClusters;
-        if (mftRecordSize is < 256 or > 65536)
+        // NTFS boot sector: 0x28 = total sectors, 0x30 = $MFT LCN,
+        // 0x38 = $MFTMirr LCN, 0x40 = signed clusters per MFT FILE record.
+        sbyte recordClusters = unchecked((sbyte)boot[0x40]);
+        long recordBytes = recordClusters > 0
+            ? recordClusters * clusterSize
+            : recordClusters < 0 && recordClusters >= -16
+                ? 1L << -recordClusters
+                : 0;
+        if (recordBytes is < 512 or > 65536 || recordBytes % bytesPerSector != 0)
         {
-            mftRecordSize = 1024;
+            throw new NtfsAnalysisException(
+                $"Nepodporovaná velikost záznamu MFT (kód {recordClusters}, {recordBytes} B).");
         }
+
+        int mftRecordSize = checked((int)recordBytes);
 
         var volume = new NtfsVolume(device, partitionOffsetBytes, partitionSizeBytes, bytesPerSector, clusterSize, mftRecordSize);
         volume.Load(boot);
@@ -127,41 +136,36 @@ public sealed class NtfsVolume : IDisposable
     }
 
     /// <summary>
-    /// Locates the record table. The documented offsets are tried first; the alternates
-    /// exist because a handful of tools in the wild write them differently. A candidate is
-    /// only accepted when a valid FILE record with correct fixups is found there.
+    /// Resolves the MFT starting cluster from the documented NTFS 0x30 field.
+    /// The 0x28 field contains the volume's sector count and must never be
+    /// interpreted as an alternative MFT location.
     /// </summary>
     private long ResolveMftLocation(byte[] boot)
     {
-        long[] candidates =
-        [
-            (long)BinaryPrimitives.ReadUInt64LittleEndian(boot.AsSpan(0x28)),
-            (long)BinaryPrimitives.ReadUInt64LittleEndian(boot.AsSpan(0x30)),
-        ];
+        ulong mftLcn = BinaryPrimitives.ReadUInt64LittleEndian(boot.AsSpan(0x30));
+        long totalClusters = _partitionSize / _clusterSize;
 
-        foreach (long candidate in candidates)
+        if (mftLcn == 0 || mftLcn >= (ulong)totalClusters)
         {
-            if (candidate <= 0) continue;
-            long byteOffset = _partitionOffset + (candidate * _clusterSize);
-            if (byteOffset + _mftRecordSize > _partitionOffset + _partitionSize) continue;
-
-            try
-            {
-                var probe = new byte[_mftRecordSize];
-                _device.ReadAt(byteOffset, probe);
-                var record = NtfsRecord.Parse(probe, _mftRecordSize);
-                if (record.Attributes.Any(a => a.Type == AttrData && !a.IsResident))
-                {
-                    return candidate;
-                }
-            }
-            catch (Exception ex) when (ex is NtfsAnalysisException or IOException)
-            {
-                // Try the next candidate.
-            }
+            throw new NtfsAnalysisException("NTFS boot sektor uvádí neplatnou adresu $MFT.");
         }
 
-        throw new NtfsAnalysisException("Nepodařilo se najít tabulku MFT – NTFS nelze bezpečně analyzovat.");
+        long byteOffset = checked(_partitionOffset + (long)mftLcn * _clusterSize);
+        if (byteOffset + _mftRecordSize > _partitionOffset + _partitionSize)
+        {
+            throw new NtfsAnalysisException("Záznam $MFT by přesahoval konec oddílu.");
+        }
+
+        var probe = new byte[_mftRecordSize];
+        _device.ReadAt(byteOffset, probe);
+        var record = NtfsRecord.Parse(probe, _mftRecordSize);
+
+        if (!record.Attributes.Any(a => a.Type == AttrData && a.NameLength == 0 && !a.IsResident))
+        {
+            throw new NtfsAnalysisException("Záznam $MFT neobsahuje očekávaný nepřímý atribut $DATA.");
+        }
+
+        return (long)mftLcn;
     }
 
     private IReadOnlyList<DataRun> ReadMftRunlist(long mftLcn)
@@ -239,7 +243,12 @@ public sealed class NtfsVolume : IDisposable
                      ?? throw new NtfsAnalysisException("Chybí metadatový soubor $Bitmap – NTFS nelze analyzovat.");
 
         var data = record.Attributes.FirstOrDefault(a => a.Type == AttrData && a.NameLength == 0)
-                   ?? throw new NtfsAnalysisException("Soubor $Bitmap neobsahuje datový atribut.");
+                   ?? throw new NtfsAnalysisException(
+                       "Záznam $Bitmap (#6) neobsahuje nepomenovaný atribut $DATA; nalezeno: " +
+                       string.Join(", ", record.Attributes.Select(a => $"0x{a.Type:X2}")) +
+                       (record.Attributes.Any(a => a.Type == 0x20)
+                           ? " (obsahuje $ATTRIBUTE_LIST; rozšířené atributy zatím nejsou podporovány)"
+                           : string.Empty));
 
         byte[] bitmap;
         if (data.IsResident)
