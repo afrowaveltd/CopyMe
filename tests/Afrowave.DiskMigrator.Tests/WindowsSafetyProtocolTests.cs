@@ -164,6 +164,19 @@ public static class WindowsSafetyProtocolTests
         Assert.Equal(0, protection.SetCalls, "no write attribute IOCTL");
     }
 
+    [Test("Unreadable volume extents refuse takeover instead of silently skipping a mounted volume")]
+    public static void UnknownVolumeOwnershipCannotPass()
+    {
+        var events = new List<string>();
+        var volumes = new FakeVolumes(events, 1) { UnknownVolumeExtents = true };
+        var protection = new FakeProtection(events, volumes);
+        var report = new WindowsSourceTakeover(volumes, protection).TakeOver(Disk(), out var session);
+        Assert.False(report.Success, "unknown volume ownership must refuse");
+        Assert.Equal<ISourceTakeoverSession?>(null, session, "no takeover session");
+        Assert.Equal(0, volumes.LockAttempts, "no lock or dismount");
+        Assert.Equal(0, protection.SetCalls, "no attribute changes");
+    }
+
     [Test("OFFLINE must never be mistaken for READ_ONLY and must be refused")]
     public static void OfflineIsNotReadOnly()
     {
@@ -229,6 +242,7 @@ public static class WindowsSafetyProtocolTests
     private sealed class FakeVolumes(List<string> events, int count) : IWindowsTakeoverVolumes
     {
         public int FailAtIndex { get; set; } = -1;
+        public bool UnknownVolumeExtents { get; set; }
         public int LockAttempts { get; private set; }
         public int LiveLocks { get; private set; }
         public int Remounts { get; private set; }
@@ -242,7 +256,10 @@ public static class WindowsSafetyProtocolTests
                 FileSystemName = "NTFS"
             }).ToArray();
 
-        public IReadOnlyList<VolumeRecord> EnumerateForTakeover() => _volumes;
+        public IReadOnlyList<VolumeRecord> EnumerateForTakeover() => UnknownVolumeExtents
+            ? [.. _volumes, new VolumeRecord
+                { GuidPath = "unidentified-volume", Extents = [], ExtentsUnavailable = true }]
+            : _volumes;
 
         public WindowsVolumeService.VolumeFlushResult FlushAndLock(
             VolumeRecord volume, out ISourceVolumeLock? volumeLock)
