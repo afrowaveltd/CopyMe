@@ -1,5 +1,6 @@
 using Afrowave.DiskMigrator.Core.Abstractions;
 using Afrowave.DiskMigrator.Core.Safety;
+using Afrowave.DiskMigrator.Core.Model;
 using Afrowave.DiskMigrator.Platform.Windows;
 
 namespace Afrowave.DiskMigrator.Tests;
