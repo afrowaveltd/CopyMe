@@ -22,6 +22,18 @@ public static class TargetDiskTests
         Assert.True(inspection.IsEmpty, "disk musí být použitelný jako cíl");
     }
 
+    [Test("Invalid 256-byte sector geometry is rejected without indexing past the MBR")]
+    public static void InvalidSectorGeometryRefused()
+    {
+        var device = new MemoryBlockDevice(64 * MiB, sectorSize: 256);
+
+        var inspection = TargetDiskInspector.Inspect(device);
+        Assert.Equal(TargetDiskState.Uncertain, inspection.State, "neplatná geometrie nesmí projít kontrolou");
+
+        var read = PartitionTableReader.Read(device);
+        Assert.False(read.Success, "neplatná geometrie nesmí způsobit výjimku ani přijetí disku");
+    }
+
     [Test("A GPT disk with partitions is refused as a target")]
     public static void GptWithPartitionsRefused()
     {
