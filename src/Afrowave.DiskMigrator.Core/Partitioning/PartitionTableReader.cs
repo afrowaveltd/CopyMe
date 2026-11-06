@@ -36,6 +36,12 @@ public static class PartitionTableReader
         var warnings = new List<string>();
 
         int sectorSize = device.SectorSize;
+        if (sectorSize is < 512 or > 65536 || (sectorSize & (sectorSize - 1)) != 0)
+        {
+            errors.Add($"Nepodporovaná velikost logického sektoru ({sectorSize} B).");
+            return new PartitionTableReadResult { Errors = errors, Warnings = warnings };
+        }
+
         long diskSectors = device.Length / sectorSize;
 
         if (device.Length % sectorSize != 0)
