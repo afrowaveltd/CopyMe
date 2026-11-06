@@ -117,6 +117,7 @@ public static class WindowsSafetyProtocolTests
         Assert.True(report.Success, string.Join(" | ", report.Problems));
         Assert.NotEqual<ISourceTakeoverSession?>(null, session, "takeover session");
         Assert.True(protection.AllLockedWhenSet, "all volumes locked when setting protection");
+        Assert.True(protection.AllLockedWhenVerified, "all volumes locked during readback verification");
         Assert.Equal(0, volumes.LiveLocks, "locks released after verifying protection");
         Assert.True(protection.Current.IsReadOnly, "source is protected");
 
@@ -137,6 +138,7 @@ public static class WindowsSafetyProtocolTests
         Assert.False(report.Success, "takeover rejected");
         Assert.Equal<ISourceTakeoverSession?>(null, session, "no session on failure");
         Assert.Equal(0, volumes.LiveLocks, "partial locks released");
+        Assert.Equal(1, volumes.Remounts, "first volume remounted on partial failure");
         Assert.Equal(0, protection.SetCalls, "no attributes modified");
     }
 
@@ -190,6 +192,23 @@ public static class WindowsSafetyProtocolTests
         Assert.Equal(2, protection.SetCalls, "set and rollback");
         Assert.False(protection.Current.IsReadOnly, "old writable state restored");
         Assert.Equal(0, volumes.LiveLocks, "locks released");
+        Assert.True(events.IndexOf("set:rw") < events.IndexOf("unlock:0"),
+            "rollback must happen before unlock");
+    }
+
+    [Test("If a failed SET ioctl applied READ_ONLY anyway, revert it safely")]
+    public static void FailedSetIoctlCanBeRolledBack()
+    {
+        var events = new List<string>();
+        var volumes = new FakeVolumes(events, 1);
+        var protection = new FakeProtection(events, volumes) { FailSetAfterChange = true };
+        var report = new WindowsSourceTakeover(volumes, protection).TakeOver(Disk(), out var session);
+        Assert.False(report.Success, "failed attribute IOCTL must refuse");
+        Assert.Equal<ISourceTakeoverSession?>(null, session, "no session");
+        Assert.False(protection.Current.IsReadOnly, "rollback restored source");
+        Assert.Equal(2, protection.SetCalls, "set and rollback");
+        Assert.Equal(0, volumes.LiveLocks, "unlocked");
+        Assert.Equal(1, volumes.Remounts, "restore mount after failed takeover");
     }
 
     private static PhysicalDisk Disk() => new()
@@ -254,7 +273,9 @@ public static class WindowsSafetyProtocolTests
         public WindowsDiskAttributes Current { get; set; }
         public bool FailReads { get; set; }
         public bool FailVerifyRead { get; set; }
+        public bool FailSetAfterChange { get; set; }
         public bool AllLockedWhenSet { get; private set; }
+        public bool AllLockedWhenVerified { get; private set; }
         public int SetCalls { get; private set; }
         public int ClearCalls { get; private set; }
         private int _readCalls;
@@ -262,6 +283,8 @@ public static class WindowsSafetyProtocolTests
         public bool TryGetAttributes(int diskNumber, out WindowsDiskAttributes attributes, out string? error)
         {
             _readCalls++;
+            if (_readCalls == 2)
+                AllLockedWhenVerified = volumes.LiveLocks == volumes.EnumerateForTakeover().Count;
             events.Add("get:" + _readCalls);
             if (FailReads || (FailVerifyRead && _readCalls == 2))
             {
@@ -281,6 +304,11 @@ public static class WindowsSafetyProtocolTests
             if (readOnly) AllLockedWhenSet = volumes.LiveLocks == volumes.EnumerateForTakeover().Count;
             events.Add(readOnly ? "set:ro" : "set:rw");
             Current = new WindowsDiskAttributes(readOnly ? 2UL : 0UL);
+            if (readOnly && FailSetAfterChange)
+            {
+                error = "simulated IOCTL failure after state change";
+                return false;
+            }
             error = null;
             return true;
         }
