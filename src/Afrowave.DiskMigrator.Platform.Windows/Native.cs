@@ -15,6 +15,7 @@ internal static class Native
 
     public const uint IoctlDiskGetDriveGeometryEx = 0x000700A0;
     public const uint IoctlDiskUpdateProperties = 0x00070140;
+    public const uint IoctlDiskGetDiskAttributes = 0x000700F0;
     public const uint IoctlDiskSetDiskAttributes = 0x0007C0F4;
     public const uint IoctlStorageGetDeviceNumber = 0x002D1080;
     public const uint IoctlStorageQueryProperty = 0x002D1400;
@@ -28,8 +29,8 @@ internal static class Native
     public const uint StorageDeviceProperty = 0;
     public const uint PropertyStandardQuery = 0;
 
-    public const ulong DiskAttributeReadOnly = 0x0000000000000001;
-    public const uint DiskAttributeVersion = 1;
+    public const ulong DiskAttributeOffline = WindowsDiskProtocol.Offline;
+    public const ulong DiskAttributeReadOnly = WindowsDiskProtocol.ReadOnly;
 
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern SafeFileHandle CreateFile(
@@ -177,23 +178,8 @@ internal static class NativeParsers
         int bytesPerSector = BitConverter.ToInt32(buffer, 16);
         long size = BitConverter.ToInt64(buffer, 24);
 
-        // DISK_GEOMETRY_EX.Data may hold a DISK_GEOMETRY_DETECTION_INFO with the physical sector size.
-        int physical = bytesPerSector;
-        int dataLength = returned - 32;
-        if (dataLength >= 8)
-        {
-            int dataOffset = 32;
-            // The first 8 bytes of the data blob are the detection info: legacy geometry (24 bytes)
-            // followed by LogicalBytesPerSector / PhysicalBytesPerSector.
-            if (dataLength >= 24 + 8)
-            {
-                int logical = BitConverter.ToInt32(buffer, dataOffset + 24);
-                int phys = BitConverter.ToInt32(buffer, dataOffset + 28);
-                if (logical > 0) bytesPerSector = logical;
-                if (phys >= bytesPerSector) physical = phys;
-            }
-        }
-
+        // DISK_GEOMETRY_EX does not contain STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR.
+        // The physical sector size is queried separately with IOCTL_STORAGE_QUERY_PROPERTY.
         if (size <= 0) throw new IOException("Zařízení hlásí nulovou velikost.");
         if (bytesPerSector <= 0) bytesPerSector = 512;
 
