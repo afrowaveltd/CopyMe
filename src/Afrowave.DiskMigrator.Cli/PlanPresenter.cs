@@ -153,9 +153,14 @@ internal static class PlanPresenter
             {
                 ui.WriteLine("      └ bez oddílů – může být cílem", ConsoleColor.DarkGray);
             }
-            else if (state is not null && state.Reasons.Count > 0)
+            else
             {
-                ui.WriteLine("      └ " + Clip(state.Reasons[0].Trim().TrimStart('•').Trim(), 70), ConsoleColor.DarkGray);
+                string? diagnostic = evaluation.SourceBlockers.FirstOrDefault()
+                    ?? evaluation.TargetBlockers.FirstOrDefault()
+                    ?? state?.Reasons.FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(diagnostic))
+                    ui.WriteLine("      └ " +
+                        Clip(diagnostic.Trim().TrimStart('•').Trim(), 100), ConsoleColor.DarkGray);
             }
         }
 
