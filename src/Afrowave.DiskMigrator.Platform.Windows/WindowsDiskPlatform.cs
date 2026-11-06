@@ -230,7 +230,9 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
         string executablePath = Environment.ProcessPath ?? "AfrowaveDiskMigrator.exe";
         string? executableRoot = Path.GetPathRoot(executablePath);
 
-        foreach (var volume in WindowsVolumeService.Enumerate())
+        var mountedRecords = WindowsVolumeService.Enumerate();
+        var activePagingVolumes = WindowsActivePaging.GetActiveVolumeGuids(mountedRecords);
+        foreach (var volume in mountedRecords)
         {
             if (volume.Extents.Count == 0) continue;
 
@@ -261,13 +263,8 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
 
                 try
                 {
-                    if (File.Exists(Path.Combine(driveRoot, "pagefile.sys"))
-                        || File.Exists(Path.Combine(driveRoot, "hiberfil.sys"))
-                        || File.Exists(Path.Combine(driveRoot, "swapfile.sys")))
-                    {
-                        usage |= VolumeUsage.PagingCarrier;
-                    }
-
+                    // The existence of hiberfil.sys/pagefile.sys on an old Windows
+                    // installation does not make it an active paging volume.
                     if (Directory.Exists(Path.Combine(driveRoot, @"Windows\System32")))
                     {
                         usage |= VolumeUsage.ContainsWindows;
@@ -278,6 +275,9 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
                     // A volume we cannot inspect is still described; protection comes from other flags.
                 }
             }
+
+            if (activePagingVolumes.Contains(volume.GuidPath))
+                usage |= VolumeUsage.PagingCarrier;
 
             volumes.Add(new MountedVolume(
                 root,
