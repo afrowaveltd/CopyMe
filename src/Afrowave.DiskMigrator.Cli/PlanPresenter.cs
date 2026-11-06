@@ -146,7 +146,8 @@ internal static class PlanPresenter
 
             if (role == DiskRole.Source)
             {
-                ui.WriteLine($"      └ obsahuje {state!.DefinedPartitionCount} oddílů – může být zdrojem",
+                ui.WriteLine(
+                    $"      └ obsahuje {state!.DefinedPartitionCount} oddílů – zdroj, nebo cíl po výslovném vymazání",
                     ConsoleColor.DarkGray);
             }
             else if (role == DiskRole.Target)
@@ -165,8 +166,8 @@ internal static class PlanPresenter
         }
 
         ui.Line();
-        ui.Detail("Zdroj = disk, který obsahuje oddíly. Cíl = disk bez oddílů.");
-        ui.Detail("Nástroj oddíly nikdy nemaže – pokud cíl oddíly obsahuje, vyberte jiný disk.");
+        ui.Detail("Zdroj = disk s oddíly. Cíl = prázdný disk nebo výslovně připravený disk.");
+        ui.Detail("Příprava obsazeného cíle smaže VŠECHNY oddíly jen po zvláštním potvrzení.");
         ui.Detail("Disky servisního počítače se nezobrazují jako zdroj ani cíl.");
     }
 
