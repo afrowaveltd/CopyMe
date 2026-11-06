@@ -537,8 +537,8 @@ internal static class Program
             bool forTarget = prompt.Contains("CÍLOVÉHO", StringComparison.Ordinal);
 
             ui.Error(forTarget
-                ? "Žádný disk není bez oddílů, takže není kam migrovat."
-                : "Žádný disk neobsahuje oddíly, takže není co migrovat.");
+                ? "Žádný disk není momentálně použitelný jako cíl."
+                : "Žádný disk neobsahuje čitelné oddíly, takže není co migrovat.");
 
             foreach (var evaluation in evaluations.Where(e => !e.IsProtected))
             {
