@@ -100,6 +100,20 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
                 var (sizeBytes, logicalSectorSize, physicalSectorSize) =
                     NativeParsers.ParseGeometry(geometryBuffer, geometryReturned);
 
+                // Query actual 512e/4Kn geometry instead of guessing from DISK_GEOMETRY_EX.
+                byte[] alignmentQuery = WindowsStorageAlignmentProtocol.CreateQuery();
+                byte[] alignmentBuffer = new byte[WindowsStorageAlignmentProtocol.DescriptorLength];
+                if (Native.DeviceIoControl(handle, Native.IoctlStorageQueryProperty,
+                        alignmentQuery, alignmentQuery.Length,
+                        alignmentBuffer, alignmentBuffer.Length, out int alignmentReturned, IntPtr.Zero) &&
+                    WindowsStorageAlignmentProtocol.TryDecode(
+                        alignmentBuffer.AsSpan(0, Math.Min(alignmentReturned, alignmentBuffer.Length)),
+                        out int logical, out int physical))
+                {
+                    logicalSectorSize = logical;
+                    physicalSectorSize = physical;
+                }
+
                 var numberBuffer = new byte[16];
                 int deviceNumber = index;
                 if (Native.DeviceIoControl(handle, Native.IoctlStorageGetDeviceNumber, null, 0,
@@ -125,10 +139,15 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
                         NativeParsers.ParseStorageDescriptor(descriptorBuffer, descriptorReturned);
                 }
 
-                bool isContainer = busType == 16; // Storage Spaces
-                string? containerReason = isContainer ? "disk je součástí Storage Spaces" : null;
+                bool attributesKnown = TryGetDiskAttributes(
+                    deviceNumber, out var attributes, out var attributeError);
+                // Unknown attributes and OFFLINE status must not be treated as a usable target.
+                bool isContainer = busType == 16 || !attributesKnown || attributes.IsOffline;
+                string? containerReason = busType == 16 ? "disk je součástí Storage Spaces"
+                    : !attributesKnown ? "atributy disku nelze spolehlivě přečíst: " + attributeError
+                    : attributes.IsOffline ? "disk je offline" : null;
 
-                bool isReadOnly = IsDeviceReadOnly(deviceNumber);
+                bool isReadOnly = attributesKnown && attributes.IsReadOnly;
 
                 return new PhysicalDisk
                 {
@@ -154,23 +173,39 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
         }
     }
 
-    private static bool IsDeviceReadOnly(int diskNumber)
+    private static bool TryGetDiskAttributes(
+        int diskNumber, out WindowsDiskAttributes attributes, out string? error)
     {
+        attributes = default;
+        error = null;
         string path = @"\\.\PhysicalDrive" + diskNumber;
-
-        var handle = Native.CreateFile(
-            path, Native.GenericRead | Native.GenericWrite, Native.FileShareRead | Native.FileShareWrite,
+        using var handle = Native.CreateFile(
+            path, Native.GenericRead, Native.FileShareRead | Native.FileShareWrite,
             IntPtr.Zero, Native.OpenExisting, 0, IntPtr.Zero);
-
         if (handle.IsInvalid)
         {
-            // A disk that refuses a write capable handle is either read-only or write-protected.
-            handle.Dispose();
-            return true;
+            int openError = Marshal.GetLastWin32Error();
+            error = $"Nelze číst atributy disku (chyba {openError}: {Win32Error.Describe(openError)}).";
+            return false;
         }
 
-        handle.Dispose();
-        return false;
+        var buffer = new byte[WindowsDiskProtocol.GetLength];
+        if (!Native.DeviceIoControl(handle, Native.IoctlDiskGetDiskAttributes,
+                null, 0, buffer, buffer.Length, out int returned, IntPtr.Zero))
+        {
+            int ioctlError = Marshal.GetLastWin32Error();
+            error = $"IOCTL_DISK_GET_DISK_ATTRIBUTES selhal (chyba {ioctlError}: {Win32Error.Describe(ioctlError)}).";
+            return false;
+        }
+
+        if (!WindowsDiskProtocol.TryDecodeGet(
+                buffer.AsSpan(0, Math.Clamp(returned, 0, buffer.Length)), out attributes))
+        {
+            error = "IOCTL_DISK_GET_DISK_ATTRIBUTES vrátil neplatnou nebo neúplnou strukturu.";
+            return false;
+        }
+
+        return true;
     }
 
     public IBlockReader OpenReader(PhysicalDisk disk) =>
@@ -276,54 +311,32 @@ public sealed class WindowsDiskPlatform : IDiskPlatform, IDiskWriteProtection
     bool IDiskWriteProtection.TrySetReadOnlyState(int diskNumber, bool readOnly, out string? error) =>
         TrySetDiskReadOnlyCore(diskNumber, readOnly, out error);
 
-    bool IDiskWriteProtection.IsReadOnly(int diskNumber) => IsDeviceReadOnly(diskNumber);
+    bool IDiskWriteProtection.TryGetAttributes(
+        int diskNumber, out WindowsDiskAttributes attributes, out string? error) =>
+        TryGetDiskAttributes(diskNumber, out attributes, out error);
 
     private bool TrySetDiskReadOnlyCore(int diskNumber, bool readOnly, out string? error)
     {
         error = null;
         string path = @"\\.\PhysicalDrive" + diskNumber;
 
-        var handle = Native.CreateFile(
-            path, Native.GenericRead | Native.GenericWrite, Native.FileShareRead | Native.FileShareWrite,
+        using var handle = Native.CreateFile(
+            path, Native.GenericRead | Native.GenericWrite,
+            Native.FileShareRead | Native.FileShareWrite,
             IntPtr.Zero, Native.OpenExisting, 0, IntPtr.Zero);
 
         if (handle.IsInvalid)
         {
-            handle.Dispose();
-
-            // Clearing a read-only flag needs a write capable handle; setting it may not.
-            if (readOnly)
-            {
-                error = "disk nelze otevřít pro zápis, nelze změnit jeho atributy";
-                return false;
-            }
-
-            handle = Native.CreateFile(
-                path, Native.GenericRead, Native.FileShareRead | Native.FileShareWrite,
-                IntPtr.Zero, Native.OpenExisting, 0, IntPtr.Zero);
-
-            if (handle.IsInvalid)
-            {
-                int openError = Marshal.GetLastWin32Error();
-                handle.Dispose();
-                error = $"disk nelze otevřít (chyba {openError}: {Win32Error.Describe(openError)})";
-                return false;
-            }
+            int openError = Marshal.GetLastWin32Error();
+            error = $"Nelze otevřít disk pro změnu atributů (chyba {openError}: {Win32Error.Describe(openError)}).";
+            return false;
         }
 
         using (handle)
         {
-            var buffer = new byte[24];
-            BitConverter.TryWriteBytes(buffer.AsSpan(0, 4), Native.DiskAttributeVersion);
-
-            // Persist = 0 on purpose: the attribute then lives only for this session. If the tool
-            // is killed or the machine loses power, a restart clears it. A persisted read-only
-            // flag would quietly change how the customer's disk behaves afterwards, which is
-            // exactly what must not happen.
-            BitConverter.TryWriteBytes(buffer.AsSpan(4, 4), 0u);
-
-            BitConverter.TryWriteBytes(buffer.AsSpan(8, 8), readOnly ? Native.DiskAttributeReadOnly : 0UL);
-            BitConverter.TryWriteBytes(buffer.AsSpan(16, 8), Native.DiskAttributeReadOnly);
+            // Full 40-byte SET_DISK_ATTRIBUTES, Version = sizeof(GET_DISK_ATTRIBUTES).
+            // The mask contains READ_ONLY only; OFFLINE is never changed.
+            var buffer = WindowsDiskProtocol.EncodeSetReadOnly(readOnly);
 
             if (Native.DeviceIoControl(handle, Native.IoctlDiskSetDiskAttributes,
                     buffer, buffer.Length, null, 0, out _, IntPtr.Zero))
