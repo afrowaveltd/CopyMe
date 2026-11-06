@@ -34,8 +34,8 @@ Spuštění:
 Aktuální výsledek:
 
 ```
-Afrowave DiskMigrator – test suite (113 testů)
-Výsledek: 113 prošlo, 0 selhalo (GitHub Actions, Linux; Windows EXE byl sestaven)
+Afrowave DiskMigrator – test suite (119 testů)
+Výsledek: 119 prošlo, 0 selhalo (GitHub Actions, Linux; Windows EXE byl sestaven)
 ```
 
 Testy nepoužívají žádnou testovací knihovnu – součástí projektu je malý runner
